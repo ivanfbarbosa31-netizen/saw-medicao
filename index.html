@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3efe7">
 <link rel="manifest" href="manifest.json">
@@ -56,7 +56,7 @@ button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .fbar .small{padding:7px 9px}
 .fbar input#emm{width:96px;flex:0 0 96px}
 svg.i{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-input,select,textarea{font:inherit;width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--tx)}
+input,select,textarea{font:inherit;font-size:16px;width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--tx)}
 input:focus,textarea:focus{outline:2px solid var(--tx);outline-offset:0}
 input.alvo{outline:2px solid var(--acc);border-color:var(--acc);background:#fff8f5}
 label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
@@ -485,6 +485,7 @@ async function vBase() {
    <button class="fab" id="bAdd" aria-label="Adicionar">${ic('add')}</button></div>`;
   const svg = document.getElementById('bsvg'), cam = svg.querySelector('g.cam');
   let mov = null, lig = null; const tf = {};
+  const dentroDeEsboco = w => Object.values(tf).some(t => w[0] >= t.c.x && w[0] <= t.c.x + t.c.w && w[1] >= t.c.y && w[1] <= t.c.y + t.c.h);
   // parede do esboço sob o dedo (para ligar a foto arrastada)
   const paredeSob = w => {
     for (const e of a.esbocos) {
@@ -529,7 +530,17 @@ async function vBase() {
     mudou: desenha,
     onDown: (w, t) => {
       const pin = t.closest?.('[data-pin]');
-      if (pin) return { up: (_, m) => { if (!m) ir({ v: 'foto', p: rota.p, a: rota.a, f: pin.dataset.pin }); } };
+      if (pin) {
+        const f = a.fotos.find(x => x.id === pin.dataset.pin);
+        return {
+          move: (w2, moveu) => { if (!moveu || !f?.liga) return; const m = paredeSob(w2); if (m && m.e === f.liga.e) { f.liga.w = m.w; f.liga.t = Math.max(0.03, Math.min(0.97, m.t)); desenha(); } },
+          up: (w2, moveu) => {
+            if (!moveu) return ir({ v: 'foto', p: rota.p, a: rota.a, f: f.id });
+            if (!dentroDeEsboco(w2)) { delete f.liga; const wd = f.pos?.w || 420; f.pos = { x: w2[0] - wd / 2, y: w2[1] - wd * (f.ar || 1.333) / 2, w: wd }; toast('Foto desligada da parede.'); }
+            tocar(); desenha();
+          }
+        };
+      }
       const el = t.closest?.('[data-item]'); if (!el) return null;
       const [tipo, id] = el.dataset.item.split(':'), it = itensDaArea(a).find(x => x.t === tipo && x.o.id === id), p0 = { ...it.o.pos };
       return {
@@ -627,6 +638,7 @@ function menuArea(a) {
 /* ===================== Editor do esboço: desenhar na tela e depois medir ===================== */
 const GRADES = [50, 100, 250, 500, 1000, 2000, 5000];
 let IMA90 = true; // ímã de 90° ligado por padrão
+const MIRA_PX = 64; // distância da mira acima do dedo, em pixels de tela
 function vEsboco() {
   const a = area(), e = a.esbocos.find(x => x.id === rota.e);
   const pick = rota.pick ? a.fotos.find(f => f.id === rota.pick) : null;
@@ -636,7 +648,8 @@ function vEsboco() {
   <div class="board"><svg id="esvg" class="vsvg esb"><g class="cam"><g id="egrid"></g><g id="edes"></g></g></svg><div class="fdica" id="edica" hidden></div></div>
   <div id="ebar" class="fbar" hidden></div>`;
   const svg = document.getElementById('esvg'), gg = document.getElementById('egrid'), gd = document.getElementById('edes');
-  let modo = !e.pts.length && !pick ? 'desenhar' : 'editar', sel = null, previa = null, hover = null;
+  let modo = !e.pts.length && !pick ? 'desenhar' : 'editar', sel = null, previa = null, hover = null, mira = null;
+  const naMira = w => [w[0], w[1] - MIRA_PX * v.k];
   const dica = t => { const d = document.getElementById('edica'); d.hidden = !t; d.textContent = t || ''; };
   const grade = () => {
     const k = v.k, [x0, y0] = v.mundo([0, 0]), [x1, y1] = v.mundo([svg.clientWidth, svg.clientHeight]);
@@ -662,6 +675,13 @@ function vEsboco() {
     }
     if (modo === 'desenhar' && e.pts.length >= 3 && !e.fechado) { const p = esbGeo(e).P[0]; pv += `<circle cx="${p[0]}" cy="${p[1]}" r="${14 * k}" fill="none" stroke="#0f5e59" stroke-width="${2 * k}" stroke-dasharray="${3 * k} ${2 * k}"/>`; }
     if (modo === 'desenhar' && e.pts.length === 0 && previa) pv = `<circle cx="${previa[0]}" cy="${previa[1]}" r="${5 * k}" fill="#e4572e"/>`;
+    if (mira) {
+      const [fx, fy] = mira.f, [rx, ry] = mira.r, q = 22 * k;
+      pv += `<line x1="${fx}" y1="${fy}" x2="${rx}" y2="${ry + 16 * k}" stroke="#1d1b18" stroke-opacity=".35" stroke-width="${1.2 * k}" stroke-dasharray="${3 * k} ${3 * k}"/>
+        <circle cx="${rx}" cy="${ry}" r="${16 * k}" fill="rgba(228,87,46,.08)" stroke="#e4572e" stroke-width="${1.6 * k}"/>
+        <path d="M ${rx - q} ${ry} H ${rx - 6 * k} M ${rx + 6 * k} ${ry} H ${rx + q} M ${rx} ${ry - q} V ${ry - 6 * k} M ${rx} ${ry + 6 * k} V ${ry + q}" stroke="#e4572e" stroke-width="${1.6 * k}"/>
+        <circle cx="${rx}" cy="${ry}" r="${1.8 * k}" fill="#e4572e"/>`;
+    }
     gd.innerHTML = svgEsboco(e, k, { sel: sel?.t === 'w' ? sel.i : null, selV: sel?.t === 'v' ? sel.i : null, selO: sel?.t === 'o' ? sel.i : null, alcas: modo === 'editar' && !pick, previa: pv, fotos: a.fotos });
   };
   // encaixe: grade fina, ângulos de 45° e fechamento no ponto inicial
@@ -711,23 +731,35 @@ function vEsboco() {
     onHover: w => { if (modo === 'desenhar') { previa = encaixar(w).p; desenha(); } },
     onDown: (w, tgt) => {
       const pin = tgt.closest?.('[data-pin]');
-      if (pin && !pick) return { up: (_, m) => { if (!m) ir({ v: 'foto', p: rota.p, a: rota.a, f: pin.dataset.pin, de: 'esb', e: e.id }); } };
+      if (pin && !pick) {
+        const f = a.fotos.find(x => x.id === pin.dataset.pin);
+        return {
+          move: (w2, moveu) => {
+            if (!moveu || !f?.liga) return; const g = esbGeo(e); let m = null;
+            for (let i = 0; i < g.n; i++) { const d = distSeg(w2, g.P[i], g.P[i + 1]); if (!m || d < m.d) m = { i, d, t: projT(w2, g.P[i], g.P[i + 1]) }; }
+            if (m) { f.liga.w = m.i; f.liga.t = Math.max(0.03, Math.min(0.97, m.t)); desenha(); }
+          },
+          up: (_, moveu) => { if (moveu) { tocar(); toast(`Foto na parede P${f.liga.w + 1}.`); } else ir({ v: 'foto', p: rota.p, a: rota.a, f: f.id, de: 'esb', e: e.id }); }
+        };
+      }
       if (pick) { const h = perto(w, true); if (h?.t !== 'w') return null; return { up: (w2) => { const g = esbGeo(e), [A, B] = [g.P[h.i], g.P[h.i + 1]]; pick.liga = { e: e.id, w: h.i, t: Math.max(0.05, Math.min(0.95, projT(w2, A, B))) }; tocar(); toast(`Foto ligada à parede ${h.i + 1}.`); ir({ v: 'foto', p: rota.p, a: rota.a, f: pick.id }); } }; }
       if (modo === 'desenhar') {
         // no modo desenho um dedo nunca move a tela; mover/zoom só com dois dedos
         if (e.fechado) return { up: () => toast('Planta fechada. Toque em Concluir para medir.') };
-        const ini = !e.pts.length ? encaixar(w).p : null;
+        // segurando ou arrastando, o ponto vai para a mira (acima do dedo); toque rápido marca onde tocou
+        const t0 = Date.now(), ini = !e.pts.length ? encaixar(naMira(w)).p : null;
+        mira = { f: w, r: naMira(w) }; previa = encaixar(mira.r).p; desenha();
         return {
-          move: (w2, moveu) => { if (ini && moveu && !e.pts.length) { e.pts.push(ini); } previa = encaixar(w2).p; desenha(); },
-          up: (w2, moveu) => { previa = null; if (ini && !moveu) { e.pts.length ? null : addPonto(w2); return; } addPonto(w2); },
-          cancel: () => { previa = null; desenha(); }
+          move: (w2, moveu) => { mira = { f: w2, r: naMira(w2) }; if (ini && moveu && !e.pts.length) e.pts.push(ini); previa = encaixar(mira.r).p; desenha(); },
+          up: (w2, moveu) => { const p = !moveu && Date.now() - t0 < 250 ? w2 : naMira(w2); previa = null; mira = null; addPonto(p); },
+          cancel: () => { previa = null; mira = null; desenha(); }
         };
       }
       const h = perto(w); if (!h) return null;
       if (h.t === 'v') {
         return {
-          move: (w2, moveu) => { if (!moveu) return; consolidar(); e.pts[h.i] = [Math.round(w2[0] / 10) * 10, Math.round(w2[1] / 10) * 10]; sel = h; desenha(); },
-          up: (_, moveu) => { if (moveu) tocar(); selecionar(h); }
+          move: (w2, moveu) => { if (!moveu) return; consolidar(); const r = naMira(w2); mira = { f: w2, r }; e.pts[h.i] = [Math.round(r[0] / 10) * 10, Math.round(r[1] / 10) * 10]; sel = h; desenha(); },
+          up: (_, moveu) => { mira = null; if (moveu) tocar(); selecionar(h); }
         };
       }
       return { up: (_, moveu) => { if (!moveu) selecionar(h); } };
