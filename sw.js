@@ -1,6 +1,6 @@
 // Cache simples para abrir sem internet na obra. Sempre tenta a rede primeiro.
-const C = 'esquadro-v1';
-self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(['./', 'index.html', 'manifest.json', 'icon.svg']))); self.skipWaiting(); });
+const C = 'esquadro-v2';
+self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(['./', 'index.html', 'manifest.json', 'icon.svg', 'apple-touch-icon.png', 'icon-512.png']))); self.skipWaiting(); });
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
