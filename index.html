@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1f2a37">
+<link rel="manifest" href="manifest.json">
+<title>SAW Medição</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--tx:#1f2a37;--mut:#6b7280;--pri:#1f5fa8;--ok:#15803d;--warn:#b45309;--bad:#b91c1c;--line:#e5e7eb;--hl:#fde047}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);padding-bottom:calc(92px + env(safe-area-inset-bottom))}
+header{position:sticky;top:0;z-index:5;background:var(--tx);color:#fff;display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px}
+header h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header button{background:none;border:0;color:#fff;font-size:22px;padding:2px 8px}
+main{padding:12px;max-width:820px;margin:0 auto}
+.card{background:var(--card);border-radius:12px;padding:12px;margin-bottom:10px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.list-item{display:flex;align-items:center;gap:10px;padding:12px;background:var(--card);border-radius:12px;margin-bottom:8px;cursor:pointer}
+.list-item .t{font-weight:600}
+.list-item .s{color:var(--mut);font-size:13px}
+.list-item .grow{flex:1;min-width:0}
+button,.btn{font:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--pri);color:#fff;cursor:pointer}
+.btn2{background:#e8eef7;color:var(--pri)}
+.btnbad{background:#fde8e8;color:var(--bad)}
+.small{padding:6px 10px;font-size:13px}
+input,select,textarea{font:inherit;width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--tx)}
+input.alvo{outline:3px solid var(--hl);border-color:#ca8a04}
+label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+.tabs{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto}
+.tabs button{background:#e5e7eb;color:var(--tx);white-space:nowrap}
+.tabs button.on{background:var(--pri);color:#fff}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:7px 4px;border-bottom:1px solid var(--line);text-align:left}
+th{font-size:12px;color:var(--mut);font-weight:500}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.o-laser{color:var(--ok)} .o-manual{color:var(--warn)} .o-measureon{color:var(--pri)}
+.muted{color:var(--mut);font-size:13px}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:8px}
+.kpi div{background:var(--bg);border-radius:10px;padding:8px}
+.kpi b{display:block;font-size:17px}
+svg.planta{width:100%;height:auto;background:#fff;border-radius:10px;border:1px solid var(--line);touch-action:none}
+.fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.fotos img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;display:block}
+.fotowrap{position:relative;user-select:none;-webkit-user-select:none}
+.fotowrap img{width:100%;display:block;border-radius:10px}
+.fotowrap svg{position:absolute;inset:0;width:100%;height:100%}
+#laserbar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:#111827;color:#fff;padding:8px 10px calc(8px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center}
+#laserbar .st{font-size:12px;min-width:86px}
+#laserbar .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#6b7280;margin-right:5px}
+#laserbar .dot.on{background:#22c55e}
+#chips{display:flex;gap:6px;overflow-x:auto;flex:1}
+#chips span{background:#374151;border-radius:8px;padding:6px 9px;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:pointer}
+#chips span.novo{background:#ca8a04;color:#111}
+dialog{border:0;border-radius:14px;padding:16px;max-width:520px;width:calc(100% - 24px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(100px + env(safe-area-inset-bottom));background:#111827;color:#fff;padding:10px 14px;border-radius:10px;z-index:9;font-size:14px}
+pre.diag{font-size:11px;max-height:180px;overflow:auto;background:#111827;color:#a7f3d0;padding:8px;border-radius:8px}
+</style>
+</head>
+<body>
+<header><button id="voltar" aria-label="Voltar">‹</button><h1 id="titulo">SAW Medição</h1><button id="menu" aria-label="Menu">☰</button></header>
+<main id="app"></main>
+<div id="laserbar">
+  <div class="st"><span class="dot" id="ldot"></span><span id="lst">Laser off</span></div>
+  <div id="chips"></div>
+  <button class="small" id="lbtn">Conectar</button>
+</div>
+<dialog id="dlg"></dialog>
+<input type="file" id="fcam" accept="image/*" capture="environment" hidden>
+<input type="file" id="ffile" hidden>
+<script>
+"use strict";
+/* ===================== Armazenamento (IndexedDB) ===================== */
+const DB = (() => {
+  let db;
+  const open = () => new Promise((ok, err) => {
+    const r = indexedDB.open('saw-medicao', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('fotos'); };
+    r.onsuccess = () => { db = r.result; ok(); };
+    r.onerror = () => err(r.error);
+  });
+  const tx = (store, mode, fn) => new Promise((ok, err) => {
+    const t = db.transaction(store, mode); const s = t.objectStore(store); const req = fn(s);
+    t.oncomplete = () => ok(req && req.result); t.onerror = () => err(t.error);
+  });
+  return {
+    open,
+    get: (st, k) => tx(st, 'readonly', s => s.get(k)),
+    put: (st, k, v) => tx(st, 'readwrite', s => s.put(v, k)),
+    del: (st, k) => tx(st, 'readwrite', s => s.delete(k)),
+  };
+})();
+
+let S = { projetos: [], leiturasSoltas: [] };
+const salvar = () => DB.put('kv', 'estado', S);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmm = v => v == null || v === '' || isNaN(v) ? '–' : Math.round(v).toLocaleString('pt-BR') + ' mm';
+const fdt = ts => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+const ORIG = { laser: ['✓', 'o-laser', 'laser'], manual: ['✎', 'o-manual', 'digitado'], measureon: ['⇩', 'o-measureon', 'MeasureOn'] };
+const oTag = o => { const x = ORIG[o] || ORIG.manual; return `<span class="${x[1]}" title="${x[2]}">${x[0]}</span>`; };
+function toast(m, t = 2200) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = m; document.body.appendChild(d); setTimeout(() => d.remove(), t); }
+
+/* ===================== Navegação ===================== */
+let rota = { v: 'home' };
+const app = document.getElementById('app');
+const proj = () => S.projetos.find(p => p.id === rota.p);
+const area = () => proj()?.areas.find(a => a.id === rota.a);
+function ir(r) { rota = r; alvo = null; render(); window.scrollTo(0, 0); }
+document.getElementById('voltar').onclick = () => {
+  if (rota.v === 'foto') ir({ v: 'area', p: rota.p, a: rota.a, tab: 'fotos' });
+  else if (rota.v === 'area') ir({ v: 'proj', p: rota.p });
+  else ir({ v: 'home' });
+};
+document.getElementById('menu').onclick = menuGeral;
+
+async function render() {
+  document.getElementById('voltar').style.visibility = rota.v === 'home' ? 'hidden' : 'visible';
+  const t = document.getElementById('titulo');
+  if (rota.v === 'home') { t.textContent = 'SAW Medição'; vHome(); }
+  else if (rota.v === 'proj') { t.textContent = proj().nome; vProj(); }
+  else if (rota.v === 'area') { t.textContent = proj().nome + ' · ' + area().nome; vArea(); }
+  else if (rota.v === 'foto') { t.textContent = area().nome + ' · foto'; await vFoto(); }
+  renderChips();
+}
+
+/* ===================== Telas ===================== */
+function vHome() {
+  const ps = [...S.projetos].sort((a, b) => b.alt - a.alt);
+  app.innerHTML = `
+  <div class="row" style="margin-bottom:10px"><input id="busca" placeholder="Buscar projeto (PV, cliente)"><button id="novoP" style="flex:0 0 auto">+ Projeto</button></div>
+  <div id="lista"></div>
+  ${ps.length ? '' : '<div class="card muted">Nenhum projeto ainda. Toque em “+ Projeto” — use o nome do pedido, ex.: <b>PV 1723 Anderson</b>.</div>'}`;
+  const desenha = f => {
+    document.getElementById('lista').innerHTML = ps.filter(p => !f || p.nome.toLowerCase().includes(f)).map(p => `
+      <div class="list-item" data-id="${p.id}"><div class="grow"><div class="t">${esc(p.nome)}</div>
+      <div class="s">${p.areas.length} área(s) · ${fdt(p.alt)}</div></div><span>›</span></div>`).join('');
+    app.querySelectorAll('.list-item').forEach(el => el.onclick = () => ir({ v: 'proj', p: el.dataset.id }));
+  };
+  desenha('');
+  document.getElementById('busca').oninput = e => desenha(e.target.value.toLowerCase());
+  document.getElementById('novoP').onclick = async () => {
+    const nome = await pedir('Novo projeto', 'Nome (ex.: PV 1723 Anderson)');
+    if (!nome) return;
+    const p = { id: uid(), nome, cliente: {}, criado: Date.now(), alt: Date.now(), areas: [] };
+    S.projetos.push(p); await salvar(); ir({ v: 'proj', p: p.id });
+  };
+}
+
+const CAMPOS = [['nome', 'Nome'], ['sobrenome', 'Sobrenome'], ['empresa', 'Empresa'], ['rua', 'Rua e número'], ['cep', 'CEP'], ['cidade', 'Cidade'], ['email', 'E-mail'], ['tel', 'Telefone']];
+function vProj() {
+  const p = proj();
+  app.innerHTML = `
+  <div class="card"><div class="row"><b style="flex:1">Áreas / cômodos</b><button id="novaA" style="flex:0 0 auto" class="small">+ Área</button></div></div>
+  <div id="areas">${p.areas.map(a => `
+    <div class="list-item" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.nome)}</div>
+    <div class="s">${a.paredes.length} parede(s) · ${a.fotos.length} foto(s) · ${a.leituras.length} leitura(s) · ${fdt(a.data)}</div></div><span>›</span></div>`).join('') || '<div class="card muted">Crie uma área por cômodo (Cozinha, Banheiro…).</div>'}</div>
+  <details class="card"><summary><b>Dados do cliente</b></summary>
+    ${CAMPOS.map(([k, l]) => `<label>${l}</label><input data-k="${k}" value="${esc(p.cliente[k])}">`).join('')}
+  </details>
+  <div class="row"><button class="btn2" id="expP">Exportar projeto (backup)</button><button class="btn2" id="renP">Renomear</button></div>
+  <div class="row" style="margin-top:8px"><button class="btnbad" id="delP">Excluir projeto</button></div>`;
+  app.querySelectorAll('#areas .list-item').forEach(el => el.onclick = () => ir({ v: 'area', p: p.id, a: el.dataset.id, tab: 'planta' }));
+  app.querySelectorAll('[data-k]').forEach(el => el.onchange = () => { p.cliente[el.dataset.k] = el.value; tocar(); });
+  document.getElementById('novaA').onclick = async () => {
+    const nome = await pedir('Nova área', 'Nome do cômodo (ex.: Cozinha)');
+    if (!nome) return;
+    const a = { id: uid(), nome, data: Date.now(), altura: null, alturaO: null, paredes: [], aberturas: [], fotos: [], nota: '', leituras: [] };
+    p.areas.push(a); tocar(); ir({ v: 'area', p: p.id, a: a.id, tab: 'planta' });
+  };
+  document.getElementById('renP').onclick = async () => { const n = await pedir('Renomear projeto', 'Nome', p.nome); if (n) { p.nome = n; tocar(); render(); } };
+  document.getElementById('delP').onclick = async () => {
+    if (!await confirmar(`Excluir “${p.nome}” e todas as medições e fotos? Não dá para desfazer.`)) return;
+    for (const a of p.areas) for (const f of a.fotos) await DB.del('fotos', f.id);
+    S.projetos = S.projetos.filter(x => x !== p); await salvar(); ir({ v: 'home' });
+  };
+  document.getElementById('expP').onclick = () => exportarProjeto(p);
+}
+function tocar() { const p = proj(); if (p) p.alt = Date.now(); salvar(); }
+
+function vArea() {
+  const a = area(), tab = rota.tab || 'planta';
+  const T = [['planta', 'Planta'], ['leituras', `Leituras (${a.leituras.length})`], ['fotos', `Fotos (${a.fotos.length})`], ['nota', 'Nota']];
+  app.innerHTML = `<div class="tabs">${T.map(([k, l]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="tab"></div>`;
+  app.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { rota.tab = b.dataset.t; alvo = null; render(); });
+  ({ planta: tPlanta, leituras: tLeituras, fotos: tFotos, nota: tNota })[tab](document.getElementById('tab'), a);
+}
+
+/* ---------- Geometria da planta ---------- */
+// Paredes em sequência: comprimento (mm) e giro (graus) no fim da parede; + = direita.
+function geometria(a) {
+  let x = 0, y = 0, h = 0; const pts = [[0, 0]];
+  for (const w of a.paredes) {
+    const L = +w.mm || 0; x += L * Math.cos(h * Math.PI / 180); y += L * Math.sin(h * Math.PI / 180);
+    pts.push([x, y]); h -= (+w.giro || 0);
+  }
+  const per = a.paredes.reduce((s, w) => s + (+w.mm || 0), 0);
+  const fech = a.paredes.length > 2 ? Math.hypot(x, y) : null;
+  let area = null;
+  if (fech != null && fech < 30) { let s = 0; for (let i = 0; i < pts.length - 1; i++) s += pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1]; area = Math.abs(s / 2); }
+  return { pts, per, fech, area };
+}
+function tPlanta(el, a) {
+  const g = geometria(a), H = +a.altura || 0;
+  const vaos = a.aberturas.reduce((s, o) => s + (+o.larg || 0) * (+o.alt || 0), 0);
+  el.innerHTML = `
+  <div class="card">${svgPlanta(a, g)}
+    <div class="kpi">
+      <div>Perímetro<b>${fmm(g.per)}</b></div>
+      <div>Pé-direito<b>${a.altura ? oTag(a.alturaO) + ' ' + fmm(a.altura) : '–'}</b></div>
+      <div>Área do piso<b>${g.area != null ? (g.area / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²' : '–'}</b></div>
+      <div>Fechamento<b style="color:${g.fech == null ? 'inherit' : g.fech < 30 ? 'var(--ok)' : 'var(--bad)'}">${g.fech == null ? '–' : fmm(g.fech)}</b></div>
+      <div>Parede bruta<b>${H && g.per ? (g.per * H / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²' : '–'}</b></div>
+      <div>Parede líquida<b>${H && g.per ? ((g.per * H - vaos) / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²' : '–'}</b></div>
+    </div>
+    <p class="muted">Fechamento = distância entre o fim da última parede e o início da primeira. Até 30 mm a planta é considerada fechada.</p>
+  </div>
+  <div class="card"><label>Pé-direito (mm)</label><input data-mm="altura" inputmode="decimal" value="${a.altura ?? ''}" placeholder="toque e meça com o laser"></div>
+  <div class="card"><b>Paredes</b> <span class="muted">(em ordem, no sentido horário)</span>
+    <table><tr><th>#</th><th class="num">Comprimento</th><th>Giro no fim</th><th></th></tr>
+    ${a.paredes.map((w, i) => `<tr><td>P${i + 1}</td>
+      <td><input data-mm="parede:${i}" inputmode="decimal" value="${w.mm ?? ''}" style="text-align:right"> <span class="muted">${oTag(w.o)}</span></td>
+      <td><select data-giro="${i}">${[90, -90, 45, -45, 0, 135, -135].map(v => `<option value="${v}" ${+w.giro === v ? 'selected' : ''}>${v > 0 ? '↱ ' + v + '° dir.' : v < 0 ? '↰ ' + (-v) + '° esq.' : 'reto'}</option>`).join('')}<option value="x" ${![90, -90, 45, -45, 0, 135, -135].includes(+w.giro) ? 'selected' : ''}>outro…</option></select></td>
+      <td><button class="small btnbad" data-delw="${i}">✕</button></td></tr>`).join('')}
+    </table>
+    <div class="row" style="margin-top:8px"><button id="addW" class="btn2">+ Parede</button><button id="addO" class="btn2">+ Porta/janela</button></div>
+  </div>
+  ${a.aberturas.length ? `<div class="card"><b>Portas e janelas</b><table><tr><th>Tipo</th><th>Parede</th><th class="num">Dist.</th><th class="num">Larg.</th><th class="num">Alt.</th><th class="num">Peit.</th><th></th></tr>
+    ${a.aberturas.map((o, i) => `<tr><td>${o.tipo === 'porta' ? '🚪' : '🪟'}</td><td>P${+o.parede + 1}</td><td class="num">${fmm(o.dist)}</td><td class="num">${fmm(o.larg)}</td><td class="num">${fmm(o.alt)}</td><td class="num">${fmm(o.peit)}</td>
+      <td><button class="small btn2" data-edo="${i}">✎</button></td></tr>`).join('')}</table></div>` : ''}
+  <div class="row"><button id="dxf3">DXF 3D (Promob)</button><button id="dxf2" class="btn2">DXF 2D</button></div>`;
+  ligarMedidas(el, a);
+  el.querySelectorAll('[data-giro]').forEach(s => s.onchange = async () => {
+    let v = s.value; if (v === 'x') { v = await pedir('Ângulo', 'Graus (+ direita, − esquerda)', a.paredes[s.dataset.giro].giro); if (v == null) return render(); }
+    a.paredes[s.dataset.giro].giro = parseFloat(String(v).replace(',', '.')) || 0; tocar(); render();
+  });
+  el.querySelectorAll('[data-delw]').forEach(b => b.onclick = async () => {
+    const i = +b.dataset.delw; if (!await confirmar(`Remover a parede P${i + 1}?`)) return;
+    a.paredes.splice(i, 1); a.aberturas = a.aberturas.filter(o => +o.parede !== i).map(o => ({ ...o, parede: +o.parede > i ? +o.parede - 1 : +o.parede })); tocar(); render();
+  });
+  document.getElementById('addW').onclick = () => { a.paredes.push({ mm: null, o: null, giro: 90 }); tocar(); render(); setTimeout(() => focarAlvo(el.querySelector(`[data-mm="parede:${a.paredes.length - 1}"]`)), 50); };
+  document.getElementById('addO').onclick = () => editarAbertura(a, null);
+  el.querySelectorAll('[data-edo]').forEach(b => b.onclick = () => editarAbertura(a, +b.dataset.edo));
+  document.getElementById('dxf3').onclick = () => baixar(`${proj().nome}_${a.nome}_3D.dxf`, dxf(a, true), 'application/dxf');
+  document.getElementById('dxf2').onclick = () => baixar(`${proj().nome}_${a.nome}_2D.dxf`, dxf(a, false), 'application/dxf');
+}
+function svgPlanta(a, g) {
+  if (a.paredes.length === 0) return '<p class="muted">Adicione as paredes em ordem. Toque no campo e dispare o laser: a medida entra sozinha.</p>';
+  const xs = g.pts.map(p => p[0]), ys = g.pts.map(p => p[1]);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+  const w = Math.max(maxx - minx, 500), h = Math.max(maxy - miny, 500), pad = Math.max(w, h) * 0.12;
+  const X = x => x - minx + pad, Y = y => maxy - y + pad, sw = Math.max(w, h) / 120;
+  let s = `<svg class="planta" viewBox="0 0 ${w + 2 * pad} ${h + 2 * pad}">`;
+  a.paredes.forEach((wl, i) => {
+    const [x1, y1] = g.pts[i], [x2, y2] = g.pts[i + 1], mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    s += `<line x1="${X(x1)}" y1="${Y(y1)}" x2="${X(x2)}" y2="${Y(y2)}" stroke="#374151" stroke-width="${sw}" stroke-linecap="round"/>`;
+    s += `<text x="${X(mx)}" y="${Y(my)}" font-size="${sw * 4}" text-anchor="middle" dy="${-sw * 1.5}" fill="#1f5fa8">P${i + 1} ${wl.mm ? Math.round(wl.mm) : '?'}</text>`;
+  });
+  for (const o of a.aberturas) {
+    const i = +o.parede; if (!g.pts[i + 1]) continue;
+    const [x1, y1] = g.pts[i], [x2, y2] = g.pts[i + 1], L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L;
+    const a1 = +o.dist || 0, a2 = a1 + (+o.larg || 0);
+    s += `<line x1="${X(x1 + ux * a1)}" y1="${Y(y1 + uy * a1)}" x2="${X(x1 + ux * a2)}" y2="${Y(y1 + uy * a2)}" stroke="${o.tipo === 'porta' ? '#b45309' : '#0ea5e9'}" stroke-width="${sw * 2.2}"/>`;
+  }
+  if (g.fech != null && g.fech >= 30) s += `<line x1="${X(g.pts.at(-1)[0])}" y1="${Y(g.pts.at(-1)[1])}" x2="${X(0)}" y2="${Y(0)}" stroke="#b91c1c" stroke-dasharray="${sw * 2}" stroke-width="${sw / 2}"/>`;
+  return s + `<circle cx="${X(0)}" cy="${Y(0)}" r="${sw * 1.6}" fill="#15803d"/></svg>`;
+}
+async function editarAbertura(a, i) {
+  const o = i == null ? { tipo: 'porta', parede: 0, dist: null, larg: 900, alt: 2110, peit: 0 } : { ...a.aberturas[i] };
+  const dlg = document.getElementById('dlg');
+  dlg.innerHTML = `<b>${i == null ? 'Nova' : 'Editar'} porta/janela</b>
+   <label>Tipo</label><select id="o_tipo"><option value="porta">Porta</option><option value="janela">Janela</option></select>
+   <label>Parede</label><select id="o_par">${a.paredes.map((w, k) => `<option value="${k}">P${k + 1} (${fmm(w.mm)})</option>`).join('')}</select>
+   <label>Distância do início da parede (mm)</label><input id="o_dist" data-dmm inputmode="decimal" value="${o.dist ?? ''}">
+   <label>Largura (mm)</label><input id="o_larg" data-dmm inputmode="decimal" value="${o.larg ?? ''}">
+   <label>Altura (mm)</label><input id="o_alt" data-dmm inputmode="decimal" value="${o.alt ?? ''}">
+   <label>Peitoril — altura do chão até a base (mm)</label><input id="o_peit" data-dmm inputmode="decimal" value="${o.peit ?? ''}">
+   <div class="row" style="margin-top:12px">${i != null ? '<button class="btnbad" id="o_del">Excluir</button>' : ''}<button class="btn2" id="o_can">Cancelar</button><button id="o_ok">Salvar</button></div>`;
+  dlg.querySelector('#o_tipo').value = o.tipo; dlg.querySelector('#o_par').value = o.parede;
+  dlg.querySelector('#o_tipo').onchange = e => { if (e.target.value === 'janela') { dlg.querySelector('#o_peit').value ||= 1000; } };
+  dlg.querySelectorAll('[data-dmm]').forEach(inp => inp.onfocus = () => focarAlvo(inp, v => { inp.value = Math.round(v); }));
+  dlg.showModal();
+  dlg.querySelector('#o_can').onclick = () => { alvo = null; dlg.close(); };
+  if (i != null) dlg.querySelector('#o_del').onclick = () => { a.aberturas.splice(i, 1); tocar(); alvo = null; dlg.close(); render(); };
+  dlg.querySelector('#o_ok').onclick = () => {
+    const n = id => { const v = parseFloat(dlg.querySelector(id).value.replace(',', '.')); return isNaN(v) ? null : v; };
+    const r = { tipo: dlg.querySelector('#o_tipo').value, parede: +dlg.querySelector('#o_par').value, dist: n('#o_dist'), larg: n('#o_larg'), alt: n('#o_alt'), peit: n('#o_peit') ?? 0 };
+    if (i == null) a.aberturas.push(r); else a.aberturas[i] = r;
+    tocar(); alvo = null; dlg.close(); render();
+  };
+}
+
+/* ---------- Leituras ---------- */
+function tLeituras(el, a) {
+  const ls = [...a.leituras].sort((x, y) => y.ts - x.ts);
+  el.innerHTML = `<div class="card"><p class="muted" style="margin-top:0">Toda medida do laser feita com esta área aberta entra aqui. ✓ = laser · ✎ = digitada · ⇩ = importada do MeasureOn.</p>
+  <div class="row"><input id="manual" inputmode="decimal" placeholder="Digitar medida (mm)"><button id="addM" style="flex:0 0 auto">Adicionar</button></div>
+  <div class="row" style="margin-top:8px"><button class="btn2" id="impX">Importar planilha MeasureOn (.xls)</button></div></div>
+  <div class="card"><table><tr><th></th><th class="num">Medida</th><th>Nome</th><th>Quando</th><th></th></tr>
+  ${ls.map(l => `<tr><td>${oTag(l.o)}</td><td class="num"><b>${fmm(l.mm)}</b></td><td><input data-ln="${l.id}" value="${esc(l.nome)}" placeholder="ex.: bancada" style="padding:5px"></td><td class="muted">${fdt(l.ts)}${l.grupo ? '<br>' + esc(l.grupo) : ''}</td><td><button class="small btnbad" data-ld="${l.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sem leituras.</td></tr>'}
+  </table></div>`;
+  document.getElementById('addM').onclick = () => { const v = parseFloat(document.getElementById('manual').value.replace(',', '.')); if (!isNaN(v)) { a.leituras.push({ id: uid(), mm: v, o: 'manual', ts: Date.now(), nome: '' }); tocar(); render(); } };
+  el.querySelectorAll('[data-ln]').forEach(i => i.onchange = () => { a.leituras.find(l => l.id === i.dataset.ln).nome = i.value; tocar(); });
+  el.querySelectorAll('[data-ld]').forEach(b => b.onclick = () => { a.leituras = a.leituras.filter(l => l.id !== b.dataset.ld); tocar(); render(); });
+  document.getElementById('impX').onclick = () => escolherArquivo('.xls', async f => importarXls(a, new Uint8Array(await f.arrayBuffer())));
+}
+
+/* ---------- Fotos com setas ---------- */
+function tFotos(el, a) {
+  el.innerHTML = `<div class="row" style="margin-bottom:10px"><button id="cam">📷 Tirar foto</button><button class="btn2" id="gal">Da galeria</button></div>
+  <div class="fotos">${a.fotos.map(f => `<div data-f="${f.id}" style="position:relative"><img data-img="${f.id}" alt=""><span style="position:absolute;left:6px;bottom:6px;background:#fde047;border-radius:6px;padding:1px 6px;font-size:12px">${f.setas.length} seta(s)</span></div>`).join('')}</div>
+  ${a.fotos.length ? '' : '<p class="muted">Tire a foto do ambiente e marque as medidas com setas, como no MeasureOn.</p>'}`;
+  el.querySelectorAll('[data-img]').forEach(async img => { const b = await DB.get('fotos', img.dataset.img); if (b) img.src = URL.createObjectURL(b); });
+  el.querySelectorAll('[data-f]').forEach(d => d.onclick = () => ir({ v: 'foto', p: rota.p, a: rota.a, f: d.dataset.f }));
+  const add = async file => {
+    const blob = await reduzir(file); const id = uid();
+    await DB.put('fotos', id, blob); a.fotos.push({ id, setas: [], ts: Date.now() }); tocar(); ir({ v: 'foto', p: rota.p, a: rota.a, f: id });
+  };
+  document.getElementById('cam').onclick = () => { const i = document.getElementById('fcam'); i.onchange = () => i.files[0] && add(i.files[0]); i.value = ''; i.click(); };
+  document.getElementById('gal').onclick = () => escolherArquivo('image/*', add);
+}
+async function reduzir(file, max = 2000) {
+  const bmp = await createImageBitmap(file); const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.85));
+}
+let setaA = null;
+async function vFoto() {
+  const a = area(), f = a.fotos.find(x => x.id === rota.f);
+  const blob = await DB.get('fotos', f.id);
+  app.innerHTML = `<div class="card"><p class="muted" style="margin:0 0 8px">Toque no <b>início</b> e depois no <b>fim</b> da medida para criar uma seta. Depois dispare o laser ou digite o valor.</p>
+   <div class="fotowrap" id="fw"><img id="fimg" src="${URL.createObjectURL(blob)}" alt=""><svg id="fsvg" viewBox="0 0 1000 1000" preserveAspectRatio="none"></svg></div></div>
+   <div class="card"><table id="setas"></table></div>
+   <div class="row"><button class="btn2" id="fjpg">Baixar foto com medidas</button><button class="btnbad" id="fdel">Excluir foto</button></div>`;
+  setaA = null;
+  const img = document.getElementById('fimg'), svg = document.getElementById('fsvg');
+  const desenha = () => {
+    const ar = img.naturalHeight / img.naturalWidth || 1;
+    svg.innerHTML = f.setas.map((s, i) => setaSvg(s, i, ar)).join('') + (setaA ? `<circle cx="${setaA[0] * 1000}" cy="${setaA[1] * 1000}" r="10" fill="#fde047" stroke="#000" stroke-width="2"/>` : '');
+    document.getElementById('setas').innerHTML = `<tr><th>Seta</th><th class="num">Medida</th><th></th></tr>` + (f.setas.map((s, i) => `<tr><td>Seta ${i + 1}</td>
+      <td><input data-mm="seta:${i}" inputmode="decimal" value="${s.mm ?? ''}" style="text-align:right"> ${oTag(s.o)}</td><td><button class="small btnbad" data-sd="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted">Nenhuma seta.</td></tr>');
+    ligarMedidas(document.getElementById('setas'), a, f);
+    document.querySelectorAll('[data-sd]').forEach(b => b.onclick = () => { f.setas.splice(+b.dataset.sd, 1); tocar(); desenha(); });
+  };
+  img.onload = desenha; if (img.complete && img.naturalWidth) desenha();
+  document.getElementById('fw').onclick = e => {
+    const r = img.getBoundingClientRect(); const p = [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+    if (!setaA) { setaA = p; desenha(); return; }
+    f.setas.push({ x1: setaA[0], y1: setaA[1], x2: p[0], y2: p[1], mm: null, o: null }); setaA = null; tocar(); desenha();
+    focarAlvo(document.querySelector(`[data-mm="seta:${f.setas.length - 1}"]`));
+  };
+  document.getElementById('fdel').onclick = async () => {
+    if (!await confirmar('Excluir esta foto e suas setas?')) return;
+    await DB.del('fotos', f.id); a.fotos = a.fotos.filter(x => x !== f); tocar(); ir({ v: 'area', p: rota.p, a: rota.a, tab: 'fotos' });
+  };
+  document.getElementById('fjpg').onclick = () => fotoComMedidas(img, f);
+}
+function setaSvg(s, i, ar) {
+  const x1 = s.x1 * 1000, y1 = s.y1 * 1000, x2 = s.x2 * 1000, y2 = s.y2 * 1000, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  const t = s.mm ? Math.round(s.mm) + ' mm' : 'Seta ' + (i + 1);
+  return `<g><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#facc15" stroke-width="6"/>
+   <circle cx="${x1}" cy="${y1}" r="9" fill="#facc15"/><circle cx="${x2}" cy="${y2}" r="9" fill="#facc15"/>
+   <g transform="translate(${mx} ${my}) scale(1 ${1 / ar})"><rect x="-70" y="-22" width="140" height="44" rx="6" fill="#fde047" stroke="#000" stroke-width="2"/>
+   <text x="0" y="10" font-size="28" text-anchor="middle" font-family="sans-serif" font-weight="700">${t}</text></g></g>`;
+}
+function fotoComMedidas(img, f) {
+  const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0); const k = c.width / 1000;
+  f.setas.forEach((s, i) => {
+    const x1 = s.x1 * c.width, y1 = s.y1 * c.height, x2 = s.x2 * c.width, y2 = s.y2 * c.height;
+    g.strokeStyle = '#facc15'; g.lineWidth = 6 * k; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    const t = s.mm ? Math.round(s.mm) + ' mm' : 'Seta ' + (i + 1); g.font = `bold ${28 * k}px sans-serif`;
+    const w = g.measureText(t).width + 24 * k, h = 44 * k, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    g.fillStyle = '#fde047'; g.fillRect(mx - w / 2, my - h / 2, w, h); g.strokeStyle = '#000'; g.lineWidth = 2 * k; g.strokeRect(mx - w / 2, my - h / 2, w, h);
+    g.fillStyle = '#000'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, mx, my);
+  });
+  c.toBlob(b => baixar(`${proj().nome}_${area().nome}_foto.jpg`, b), 'image/jpeg', 0.9);
+}
+function tNota(el, a) {
+  el.innerHTML = `<div class="card"><textarea id="nota" rows="10" placeholder="Observações da visita: tomadas, pontos de água, gás, interferências…">${esc(a.nota)}</textarea></div>`;
+  document.getElementById('nota').oninput = e => { a.nota = e.target.value; tocar(); };
+}
+
+/* ===================== Campo-alvo do laser ===================== */
+// O campo com foco (amarelo) recebe a próxima medida do laser.
+let alvo = null;
+function focarAlvo(inp, aplicar) {
+  if (!inp) return;
+  if (!aplicar && inp.onfocus) return inp.onfocus();
+  document.querySelectorAll('input.alvo').forEach(x => x.classList.remove('alvo'));
+  inp.classList.add('alvo'); inp.focus({ preventScroll: false });
+  alvo = { inp, aplicar };
+}
+function ligarMedidas(root, a, foto) {
+  root.querySelectorAll('[data-mm]').forEach(inp => {
+    const [tipo, idx] = inp.dataset.mm.split(':');
+    const set = (v, o) => {
+      if (tipo === 'altura') { a.altura = v; a.alturaO = o; }
+      else if (tipo === 'parede') { a.paredes[idx].mm = v; a.paredes[idx].o = o; }
+      else if (tipo === 'seta') { foto.setas[idx].mm = v; foto.setas[idx].o = o; }
+      tocar();
+    };
+    inp.onfocus = () => focarAlvo(inp, v => { set(v, 'laser'); inp.value = Math.round(v); proximoAlvo(inp); });
+    inp.onchange = () => { const v = parseFloat(inp.value.replace(',', '.')); set(isNaN(v) ? null : v, isNaN(v) ? null : 'manual'); render(); };
+  });
+}
+async function proximoAlvo(inp) {
+  const todos = [...document.querySelectorAll('[data-mm]')]; const i = todos.indexOf(inp);
+  const y = window.scrollY; await render(); window.scrollTo(0, y);
+  const nx = [...document.querySelectorAll('[data-mm]')][i + 1];
+  if (nx && !nx.value) focarAlvo(nx); else alvo = null;
+}
+
+/* ===================== Laser Bosch GLM (Bluetooth LE) ===================== */
+// Protocolo levantado pela comunidade (não é documentação Bosch):
+//   serviço 02a6c0d0-…, característica 02a6c0d1-… (indicate + write)
+//   escrever C0 55 02 01 00 1A liga o envio automático das medidas
+//   medida chega como C0 55 10 06 …, distância float32 LE em metros nos bytes 7..10
+const SVC = '02a6c0d0-0451-4000-b000-fb3210111989', CHR = '02a6c0d1-0451-4000-b000-fb3210111989';
+const L = { dev: null, ch: null, log: [], recentes: [] };
+function setLaser(on, txt) { document.getElementById('ldot').classList.toggle('on', on); document.getElementById('lst').textContent = txt; document.getElementById('lbtn').textContent = on ? 'Desligar' : 'Conectar'; }
+const hex = dv => [...new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)].map(b => b.toString(16).padStart(2, '0')).join(' ');
+document.getElementById('lbtn').onclick = async () => {
+  if (L.dev?.gatt.connected) { L.manual = true; L.dev.gatt.disconnect(); return; }
+  if (!navigator.bluetooth) {
+    return aviso('Bluetooth indisponível neste navegador', `O Safari do iPhone não libera Bluetooth para sites. No iPhone, abra este endereço no app <b>Bluefy</b> (grátis na App Store). No computador ou Android use o <b>Chrome</b>.<br><br>Antes, desconecte o laser do MeasureOn — ele só conversa com um aparelho por vez.`);
+  }
+  try {
+    L.dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }, { namePrefix: 'GLM' }, { namePrefix: 'Bosch' }], optionalServices: [SVC] });
+    L.dev.addEventListener('gattserverdisconnected', aoDesconectar);
+    await conectarGatt();
+  } catch (e) { setLaser(false, 'Laser off'); if (e.name !== 'NotFoundError') aviso('Não conectou', esc(e.message)); }
+};
+async function conectarGatt() {
+  setLaser(false, 'Conectando…');
+  const srv = await L.dev.gatt.connect();
+  L.ch = await (await srv.getPrimaryService(SVC)).getCharacteristic(CHR);
+  L.ch.addEventListener('characteristicvaluechanged', e => pacote(e.target.value));
+  await L.ch.startNotifications();
+  const cmd = new Uint8Array([0xC0, 0x55, 0x02, 0x01, 0x00, 0x1A]);
+  if (L.ch.writeValueWithoutResponse && L.ch.properties.writeWithoutResponse) await L.ch.writeValueWithoutResponse(cmd); else await L.ch.writeValue(cmd);
+  L.manual = false; setLaser(true, L.dev.name || 'GLM'); toast('Laser conectado. Meça pelo botão do laser.');
+}
+async function aoDesconectar() {
+  setLaser(false, 'Laser off');
+  if (L.manual) return;
+  for (let t = 0; t < 3; t++) { try { await new Promise(r => setTimeout(r, 1500)); await conectarGatt(); return; } catch (e) { } }
+  toast('Laser desconectou.');
+}
+function pacote(dv) {
+  L.log.unshift(new Date().toLocaleTimeString('pt-BR') + '  ' + hex(dv)); L.log.length = Math.min(L.log.length, 60);
+  const b = i => dv.getUint8(i);
+  if (dv.byteLength >= 11 && b(0) === 0xC0 && b(1) === 0x55 && b(2) === 0x10 && b(3) === 0x06) {
+    const m = dv.getFloat32(7, true);
+    if (m > 0 && m < 300) receber(Math.round(m * 10000) / 10, 'laser');
+  }
+}
+// Leitura nova: vai para o campo amarelo, senão para as leituras da área aberta.
+function receber(mm, o) {
+  L.recentes.unshift({ mm, ts: Date.now() }); L.recentes.length = Math.min(L.recentes.length, 12);
+  if (navigator.vibrate) navigator.vibrate(40);
+  if (area()) { area().leituras.push({ id: uid(), mm, o, ts: Date.now(), nome: '' }); tocar(); }
+  else { S.leiturasSoltas.push({ id: uid(), mm, o, ts: Date.now() }); salvar(); }
+  if (alvo && document.body.contains(alvo.inp)) alvo.aplicar(mm);
+  else if (rota.v === 'area' && rota.tab === 'leituras') render();
+  renderChips(true); toast(`${fmm(mm)} ✓`, 1200);
+}
+function renderChips(novo) {
+  document.getElementById('chips').innerHTML = L.recentes.map((r, i) => `<span class="${novo && i === 0 ? 'novo' : ''}" data-i="${i}">${fmm(r.mm)}</span>`).join('') || '<span style="background:none;color:#9ca3af">medidas aparecem aqui</span>';
+  document.querySelectorAll('#chips [data-i]').forEach(c => c.onclick = () => { const r = L.recentes[+c.dataset.i]; if (alvo && document.body.contains(alvo.inp)) alvo.aplicar(r.mm); else toast('Toque num campo para usar esta medida.'); });
+}
+
+/* ===================== Exportações ===================== */
+function baixar(nome, data, tipo) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: tipo || 'application/octet-stream' });
+  const nm = nome.replace(/[\\/:*?"<>|]/g, '_');
+  if (navigator.canShare && navigator.canShare({ files: [new File([blob], nm)] })) { navigator.share({ files: [new File([blob], nm, { type: blob.type })] }).catch(() => { }); return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nm; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+// DXF R12 ASCII, unidades em metros, só LINE, camadas no padrão do MeasureOn.
+function dxf(a, tres) {
+  const g = geometria(a), H = (+a.altura || 0) / 1000, out = [];
+  const f = n => (Math.round(n * 1e6) / 1e6).toString();
+  const line = (ly, p, q) => out.push('0', 'LINE', '8', ly, '10', f(p[0]), '20', f(p[1]), '30', f(p[2] || 0), '11', f(q[0]), '21', f(q[1]), '31', f(q[2] || 0));
+  const P = g.pts.map(([x, y]) => [x / 1000, y / 1000]);
+  a.paredes.forEach((w, i) => {
+    const p = P[i], q = P[i + 1];
+    line('Bosch_MeasureOn_Wall', [...p, 0], [...q, 0]);
+    if (tres && H) { line('Bosch_MeasureOn_Wall', [...p, H], [...q, H]); line('Bosch_MeasureOn_Wall', [...p, 0], [...p, H]); }
+  });
+  for (const o of a.aberturas) {
+    const i = +o.parede; if (!P[i + 1]) continue;
+    const [x1, y1] = P[i], [x2, y2] = P[i + 1], Lw = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / Lw, uy = (y2 - y1) / Lw;
+    const d1 = (+o.dist || 0) / 1000, d2 = d1 + (+o.larg || 0) / 1000, z1 = tres ? (+o.peit || 0) / 1000 : 0, z2 = tres ? z1 + (+o.alt || 0) / 1000 : 0;
+    const A = [x1 + ux * d1, y1 + uy * d1], B = [x1 + ux * d2, y1 + uy * d2], ly = o.tipo === 'porta' ? 'Bosch_MeasureOn_Door' : 'Bosch_MeasureOn_Window';
+    if (tres) { line(ly, [...A, z1], [...B, z1]); line(ly, [...B, z1], [...B, z2]); line(ly, [...B, z2], [...A, z2]); line(ly, [...A, z2], [...A, z1]); }
+    else { const nx = -uy * 0.1, ny = ux * 0.1; line(ly, A, B); line(ly, B, [B[0] + nx, B[1] + ny]); line(ly, [B[0] + nx, B[1] + ny], [A[0] + nx, A[1] + ny]); line(ly, [A[0] + nx, A[1] + ny], A); }
+  }
+  return ['0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1009', '9', '$INSUNITS', '70', '6', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES', ...out, '0', 'ENDSEC', '0', 'EOF', ''].join('\r\n');
+}
+async function exportarProjeto(p) {
+  const fotos = {};
+  for (const a of p.areas) for (const f of a.fotos) { const b = await DB.get('fotos', f.id); if (b) fotos[f.id] = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); }
+  baixar(`${p.nome}.sawmed.json`, JSON.stringify({ formato: 'saw-medicao', versao: 1, exportado: new Date().toISOString(), projeto: p, fotos }), 'application/json');
+}
+async function importarProjeto(f) {
+  let j; try { j = JSON.parse(await f.text()); } catch (e) { return aviso('Arquivo inválido', 'Não é um backup do SAW Medição.'); }
+  if (j.formato !== 'saw-medicao') return aviso('Arquivo inválido', 'Não é um backup do SAW Medição.');
+  const ex = S.projetos.find(x => x.id === j.projeto.id);
+  if (ex && !await confirmar(`“${ex.nome}” já existe neste aparelho. Substituir pela versão do arquivo?`)) return;
+  for (const [id, url] of Object.entries(j.fotos || {})) await DB.put('fotos', id, await (await fetch(url)).blob());
+  S.projetos = S.projetos.filter(x => x.id !== j.projeto.id); S.projetos.push(j.projeto); await salvar();
+  toast('Projeto importado.'); ir({ v: 'proj', p: j.projeto.id });
+}
+
+/* ===================== Importar planilha do MeasureOn (.xls BIFF8) ===================== */
+// O MeasureOn gera .xls via xlslib com o fluxo Workbook contíguo; basta varrer os registros BIFF.
+function lerXls(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let p = -1;
+  for (let i = 0; i < u8.length - 6; i++) if (u8[i] === 0x09 && u8[i + 1] === 0x08 && u8[i + 2] === 0x10 && u8[i + 3] === 0 && u8[i + 4] === 0 && u8[i + 5] === 6) { p = i; break; }
+  if (p < 0) throw new Error('Planilha não reconhecida');
+  const sst = [], cel = {};
+  const str = (o, n, end) => {
+    const fl = u8[o++]; let rt = 0, sz = 0;
+    if (fl & 8) { rt = dv.getUint16(o, true); o += 2; } if (fl & 4) { sz = dv.getUint32(o, true); o += 4; }
+    let s = ''; if (fl & 1) { for (let k = 0; k < n && o + 1 < end; k++, o += 2) s += String.fromCharCode(dv.getUint16(o, true)); } else { for (let k = 0; k < n && o < end; k++) s += String.fromCharCode(u8[o++]); }
+    return [s, o + 4 * rt + sz];
+  };
+  const rk = v => { let x; if (v & 2) { x = v >> 2; } else { const b = new DataView(new ArrayBuffer(8)); b.setUint32(4, v & 0xfffffffc, true); x = b.getFloat64(0, true); } return v & 1 ? x / 100 : x; };
+  while (p + 4 <= u8.length) {
+    const t = dv.getUint16(p, true), l = dv.getUint16(p + 2, true), b = p + 4; p = b + l;
+    if (t === 0xFC) { const u = dv.getUint32(b + 4, true); let o = b + 8; for (let k = 0; k < u && o < b + l; k++) { const n = dv.getUint16(o, true); let s; [s, o] = str(o + 2, n, b + l); sst.push(s); } }
+    else if (t === 0xFD) { (cel[dv.getUint16(b, true)] ??= {})[dv.getUint16(b + 2, true)] = sst[dv.getUint32(b + 6, true)]; }
+    else if (t === 0x203) { (cel[dv.getUint16(b, true)] ??= {})[dv.getUint16(b + 2, true)] = dv.getFloat64(b + 6, true); }
+    else if (t === 0x27E) { (cel[dv.getUint16(b, true)] ??= {})[dv.getUint16(b + 2, true)] = rk(dv.getUint32(b + 6, true)); }
+    else if (t === 0x204) { (cel[dv.getUint16(b, true)] ??= {})[dv.getUint16(b + 2, true)] = str(b + 8, dv.getUint16(b + 6, true), b + l)[0]; }
+    else if (t === 0x0A && Object.keys(cel).length) break;
+  }
+  const linhas = Object.keys(cel).map(Number).sort((x, y) => x - y).map(r => cel[r]);
+  const cab = Object.values(linhas[0] || {}).map(String);
+  return linhas.slice(1).map(c => { const o = {}; Object.keys(c).forEach(k => o[cab[k]] = c[k]); return o; });
+}
+// Datas no sistema Excel de 1904 (conferido: 44850 = 17/10/2026).
+const xlsData = (d, h) => { const dia = Math.floor(d); const base = new Date(1904, 0, 1); base.setDate(base.getDate() + dia); return base.getTime() + Math.round((h ?? (d - dia)) * 864e5); };
+async function importarXls(a, u8) {
+  let rows; try { rows = lerXls(u8); } catch (e) { return aviso('Não consegui ler', esc(e.message)); }
+  rows = rows.filter(r => typeof r['Valor'] === 'number');
+  if (!rows.length) return aviso('Planilha vazia', 'Nenhuma medida encontrada.');
+  const grupos = {}; rows.forEach(r => { const g = r['Grupo de medição'] || 'Planilha'; (grupos[g] ??= []).push(r); });
+  const ordem = Object.keys(grupos).sort((x, y) => xlsData(grupos[y][0]['Data'], grupos[y][0]['Hora']) - xlsData(grupos[x][0]['Data'], grupos[x][0]['Hora']));
+  const dlg = document.getElementById('dlg');
+  dlg.innerHTML = `<b>Importar para “${esc(a.nome)}”</b><p class="muted">${rows.length} medidas em ${ordem.length} grupo(s). Marque os grupos desta visita.</p>
+   <div style="max-height:50vh;overflow:auto">${ordem.map((g, i) => `<label style="display:flex;gap:8px;align-items:center;font-size:14px;color:var(--tx)"><input type="checkbox" value="${i}" style="width:auto" ${ordem.length === 1 ? 'checked' : ''}> ${esc(g)} — ${grupos[g].length} medida(s), ${fdt(xlsData(grupos[g][0]['Data'], grupos[g][0]['Hora']))}</label>`).join('')}</div>
+   <div class="row" style="margin-top:12px"><button class="btn2" id="xc">Cancelar</button><button id="xo">Importar</button></div>`;
+  dlg.showModal();
+  dlg.querySelector('#xc').onclick = () => dlg.close();
+  dlg.querySelector('#xo').onclick = () => {
+    const chave = new Set(a.leituras.map(l => l.grupo + '|' + l.ts + '|' + l.mm)); let n = 0;
+    dlg.querySelectorAll('input:checked').forEach(c => grupos[ordem[c.value]].forEach(r => {
+      const l = { id: uid(), mm: Math.round(r['Valor'] * 100) / 100, o: 'measureon', ts: xlsData(r['Data'], r['Hora']), nome: r['Nomear'] && r['Nomear'] !== r['Tipo'] ? r['Nomear'] : '', grupo: ordem[c.value] };
+      const k = l.grupo + '|' + l.ts + '|' + l.mm; if (!chave.has(k)) { chave.add(k); a.leituras.push(l); n++; }
+    }));
+    tocar(); dlg.close(); toast(`${n} medida(s) importada(s).`); render();
+  };
+}
+
+/* ===================== Diálogos ===================== */
+function pedir(tit, lab, val = '') {
+  return new Promise(ok => {
+    const d = document.getElementById('dlg');
+    d.innerHTML = `<b>${esc(tit)}</b><label>${esc(lab)}</label><input id="pv" value="${esc(val)}"><div class="row" style="margin-top:12px"><button class="btn2" id="pc">Cancelar</button><button id="po">OK</button></div>`;
+    d.showModal(); const i = d.querySelector('#pv'); i.focus();
+    const fim = v => { d.close(); ok(v); };
+    d.querySelector('#pc').onclick = () => fim(null);
+    d.querySelector('#po').onclick = () => fim(i.value.trim() || null);
+    i.onkeydown = e => { if (e.key === 'Enter') fim(i.value.trim() || null); };
+  });
+}
+function confirmar(msg) {
+  return new Promise(ok => {
+    const d = document.getElementById('dlg');
+    d.innerHTML = `<p>${esc(msg)}</p><div class="row"><button class="btn2" id="cn">Cancelar</button><button class="btnbad" id="cs">Confirmar</button></div>`;
+    d.showModal(); d.querySelector('#cn').onclick = () => { d.close(); ok(false); }; d.querySelector('#cs').onclick = () => { d.close(); ok(true); };
+  });
+}
+function aviso(tit, html) {
+  const d = document.getElementById('dlg');
+  d.innerHTML = `<b>${esc(tit)}</b><p>${html}</p><button id="ak">OK</button>`; d.showModal(); d.querySelector('#ak').onclick = () => d.close();
+}
+function escolherArquivo(accept, fn) { const i = document.getElementById('ffile'); i.accept = accept; i.value = ''; i.onchange = () => i.files[0] && fn(i.files[0]); i.click(); }
+function menuGeral() {
+  const d = document.getElementById('dlg');
+  d.innerHTML = `<b>Menu</b>
+   <div style="display:grid;gap:8px;margin-top:10px">
+    <button class="btn2" id="mi">Importar projeto (backup .json)</button>
+    <button class="btn2" id="mt">Testar recepção (medida simulada)</button>
+    <button class="btn2" id="md">Diagnóstico do Bluetooth</button>
+    <button id="mf">Fechar</button></div>
+   <p class="muted">SAW Medição · protótipo v0.1 · dados guardados só neste aparelho. ${S.leiturasSoltas.length ? S.leiturasSoltas.length + ' leitura(s) feitas fora de uma área.' : ''}</p>`;
+  d.showModal();
+  d.querySelector('#mf').onclick = () => d.close();
+  d.querySelector('#mi').onclick = () => { d.close(); escolherArquivo('.json,application/json', importarProjeto); };
+  d.querySelector('#mt').onclick = () => { d.close(); const dv = new DataView(new ArrayBuffer(12)); [0xC0, 0x55, 0x10, 0x06].forEach((v, i) => dv.setUint8(i, v)); dv.setFloat32(7, 0.56815, true); pacote(dv); };
+  d.querySelector('#md').onclick = () => { d.innerHTML = `<b>Pacotes recebidos do laser</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
+}
+
+/* ===================== Início ===================== */
+(async () => {
+  await DB.open();
+  const e = await DB.get('kv', 'estado'); if (e) S = { leiturasSoltas: [], ...e };
+  if (navigator.storage?.persist) navigator.storage.persist();
+  render();
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
+})();
+</script>
+</body>
+</html>
