@@ -6,6 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3efe7">
 <link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Esquadro">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Esquadro</title>
 <style>
 :root{--bg:#f3efe7;--card:#fffdf9;--tx:#1d1b18;--mut:#857c6f;--pri:#1d1b18;--acc:#e4572e;--acc2:#fde3d8;--ok:#0f5e59;--warn:#b7791f;--bad:#b3261e;--line:#e4dccf;--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace}
@@ -32,6 +36,20 @@ button,.btn{font:inherit;font-weight:600;border:0;border-radius:999px;padding:11
 .btnbad{background:transparent;color:var(--bad);border:1px solid #ecc9c5}
 .small{padding:7px 12px;font-size:13px}
 button{white-space:nowrap}
+html{overscroll-behavior:none}
+body.travado{position:fixed;inset:0;overflow:hidden;width:100%}
+body.travado main{height:100%;overflow:hidden}
+.linha2{flex-basis:100%;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.fbar:has(.linha2) > input, .fbar:has(.linha2) > b{margin-bottom:0}
+.seg button{font-size:12px}
+.seg{display:flex;background:var(--bg);border-radius:999px;padding:2px}
+.seg button{background:transparent;color:var(--mut);padding:6px 10px}
+.seg button.on{background:var(--c);color:#fff}
+.cores{display:flex;gap:6px;flex-basis:100%;justify-content:flex-end}
+.cores[hidden]{display:none}
+.btn2.on{background:var(--tx);color:#fff;border-color:var(--tx)}
+.cor{width:24px;height:24px;padding:0;border-radius:50%;border:1px solid rgba(0,0,0,.2)}
+.cor.on{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--tx)}
 button:focus{outline:none}
 button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .fbar .small{padding:7px 9px}
@@ -159,7 +177,7 @@ const IC = {
   ajustar: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>', menos: '<path d="M5 12h14"/>',
   desfazer: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>', link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
   regua: '<path d="M4 20V4h5v11h11v5z"/><path d="M4 8h2M4 12h2M8 20v-2M12 20v-2M16 20v-2"/>', altura: '<path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/>',
-  seta: '<path d="M5 19L19 5"/><path d="M5 13v6h6M13 5h6v6"/>', leituras: '<path d="M4 6h16M4 12h16M4 18h10"/>', baixar: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>'
+  seta: '<path d="M5 19L19 5"/><path d="M5 13v6h6M13 5h6v6"/>', leituras: '<path d="M4 6h16M4 12h16M4 18h10"/>', baixar: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', esquadro: '<path d="M5 4v15h15"/><path d="M5 14h5v5"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24">${IC[n]}</svg>`;
 const oTag = o => { const x = ORIG[o] || ORIG.manual; return `<span class="${x[1]}" title="${x[2]}">${x[0]}</span>`; };
@@ -181,6 +199,7 @@ document.getElementById('voltar').onclick = () => {
 document.getElementById('menu').onclick = menuGeral;
 
 async function render() {
+  document.body.classList.toggle('travado', ['area', 'esb', 'foto'].includes(rota.v));
   document.getElementById('voltar').style.display = rota.v === 'home' ? 'none' : '';
   const t = document.getElementById('titulo');
   if (rota.v === 'home') { t.innerHTML = '<span class="logo"></span><span class="marca">esquadro</span>'; vHome(); }
@@ -464,10 +483,22 @@ async function vBase() {
    <div class="fdica" id="bdica" ${itensDaArea(a).length ? 'hidden' : ''}>Toque em + para criar o esboço, tirar fotos ou anotar</div>
    <button class="fab" id="bAdd" aria-label="Adicionar">${ic('add')}</button></div>`;
   const svg = document.getElementById('bsvg'), cam = svg.querySelector('g.cam');
-  let mov = null;
+  let mov = null, lig = null; const tf = {};
+  // parede do esboço sob o dedo (para ligar a foto arrastada)
+  const paredeSob = w => {
+    for (const e of a.esbocos) {
+      const t = tf[e.id]; if (!t || w[0] < t.c.x || w[0] > t.c.x + t.c.w || w[1] < t.c.y || w[1] > t.c.y + t.c.h) continue;
+      const p = [(w[0] - t.tx) / t.s, (w[1] - t.ty) / t.s], g = esbGeo(e); let m = null;
+      for (let i = 0; i < g.n; i++) { const d = distSeg(p, g.P[i], g.P[i + 1]); if (d < 34 * v.k / t.s && (!m || d < m.d)) m = { e: e.id, w: i, d, t: projT(p, g.P[i], g.P[i + 1]) }; }
+      return m;
+    }
+    return null;
+  };
+  // foto ligada a uma parede sai da base e vira a bolinha na planta
+  const visivel = it => !(it.t === 'foto' && it.o.liga && a.esbocos.some(e => e.id === it.o.liga.e));
   const desenha = () => {
     const k = v.k;
-    cam.innerHTML = itensDaArea(a).map(it => {
+    cam.innerHTML = itensDaArea(a).filter(visivel).map(it => {
       const c = caixaItem(it), o = it.o, ativo = mov && mov.it.o === o;
       const sombra = `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="${6 * k}" fill="#fff" stroke="${ativo ? '#e4572e' : '#ddd3c3'}" stroke-width="${(ativo ? 2.5 : 1) * k}"/>`;
       if (it.t === 'esboco') {
@@ -476,7 +507,8 @@ async function vBase() {
         if (xs.length > 1) {
           const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx || 1, bh = Math.max(...ys) - by || 1, s = Math.min(c.w * 0.74 / bw, c.h * 0.66 / bh);
           const tx = c.x + c.w / 2 - (bx + bw / 2) * s, ty = c.y + c.h / 2 - (by + bh / 2) * s;
-          inner = `<g transform="translate(${tx} ${ty}) scale(${s})">${svgEsboco(o, c.w / 420 / s, { fotos: a.fotos })}</g>`; // miniatura em escala, como se tivesse 420 px
+          tf[o.id] = { tx, ty, s, c };
+          inner = `<g transform="translate(${tx} ${ty}) scale(${s})">${svgEsboco(o, c.w / 420 / s, { fotos: a.fotos, sel: lig?.e === o.id ? lig.w : null })}</g>`; // miniatura em escala, como se tivesse 420 px
         }
         return `<g data-item="esboco:${o.id}">${sombra}${inner}<text x="${c.x + 8 * k}" y="${c.y + 16 * k}" font-size="${11 * k}" fill="#1d1b18" font-weight="700" class="m">${esc(o.nome.toUpperCase())}</text></g>`;
       }
@@ -495,16 +527,25 @@ async function vBase() {
   const v = new Vista(svg, {
     mudou: desenha,
     onDown: (w, t) => {
+      const pin = t.closest?.('[data-pin]');
+      if (pin) return { up: (_, m) => { if (!m) ir({ v: 'foto', p: rota.p, a: rota.a, f: pin.dataset.pin }); } };
       const el = t.closest?.('[data-item]'); if (!el) return null;
       const [tipo, id] = el.dataset.item.split(':'), it = itensDaArea(a).find(x => x.t === tipo && x.o.id === id), p0 = { ...it.o.pos };
       return {
-        move: (w2, moveu) => { if (!moveu) return; if (!mov) mov = { it, w0: w }; it.o.pos.x = p0.x + w2[0] - mov.w0[0]; it.o.pos.y = p0.y + w2[1] - mov.w0[1]; desenha(); },
-        up: (_, moveu) => { if (moveu) { mov = null; tocar(); desenha(); } else abrirItem(a, it); },
-        cancel: () => { if (mov) { it.o.pos.x = p0.x; it.o.pos.y = p0.y; mov = null; desenha(); } }
+        move: (w2, moveu) => { if (!moveu) return; if (!mov) mov = { it, w0: w }; it.o.pos.x = p0.x + w2[0] - mov.w0[0]; it.o.pos.y = p0.y + w2[1] - mov.w0[1]; if (it.t === 'foto') lig = paredeSob(w2); desenha(); },
+        up: (_, moveu) => {
+          if (!moveu) return abrirItem(a, it);
+          if (it.t === 'foto' && lig) {
+            it.o.liga = { e: lig.e, w: lig.w, t: Math.max(0.05, Math.min(0.95, lig.t)) }; it.o.pos.x = p0.x; it.o.pos.y = p0.y;
+            toast(`Foto ligada à parede P${lig.w + 1}.`);
+          }
+          mov = null; lig = null; tocar(); desenha();
+        },
+        cancel: () => { if (mov) { it.o.pos.x = p0.x; it.o.pos.y = p0.y; mov = null; lig = null; desenha(); } }
       };
     }
   });
-  const ajustar = () => v.enquadrar(caixaUniao(itensDaArea(a).map(caixaItem)));
+  const ajustar = () => v.enquadrar(caixaUniao(itensDaArea(a).filter(visivel).map(caixaItem)));
   ligarZoom(app, v, ajustar); ajustar();
   document.getElementById('bLeit').onclick = () => ir({ v: 'leituras', p: rota.p, a: rota.a });
   document.getElementById('bAdd').onclick = () => menuAdicionar(a, v);
@@ -584,6 +625,7 @@ function menuArea(a) {
 
 /* ===================== Editor do esboço: desenhar na tela e depois medir ===================== */
 const GRADES = [50, 100, 250, 500, 1000, 2000, 5000];
+let IMA90 = true; // ímã de 90° ligado por padrão
 function vEsboco() {
   const a = area(), e = a.esbocos.find(x => x.id === rota.e);
   const pick = rota.pick ? a.fotos.find(f => f.id === rota.pick) : null;
@@ -608,7 +650,12 @@ function vEsboco() {
     const k = v.k; let pv = '';
     if (modo === 'desenhar' && previa && e.pts.length && !e.fechado) {
       const g = esbGeo(e), u = g.P[g.n], L = Math.hypot(previa[0] - u[0], previa[1] - u[1]);
-      pv = `<line x1="${u[0]}" y1="${u[1]}" x2="${previa[0]}" y2="${previa[1]}" stroke="#e4572e" stroke-width="${2.5 * k}" stroke-dasharray="${6 * k} ${4 * k}"/>
+      // marca de ângulo reto no canto quando a nova parede faz 90° com a anterior
+      if (g.n && L > 1) {
+        const [px, py] = g.dir[g.n - 1], nx = (previa[0] - u[0]) / L, ny = (previa[1] - u[1]) / L, q = 12 * k;
+        if (Math.abs(px * nx + py * ny) < 0.01) pv += `<path d="M ${u[0] - px * q} ${u[1] - py * q} L ${u[0] - px * q + nx * q} ${u[1] - py * q + ny * q} L ${u[0] + nx * q} ${u[1] + ny * q}" fill="none" stroke="#0f5e59" stroke-width="${1.6 * k}"/>`;
+      }
+      pv += `<line x1="${u[0]}" y1="${u[1]}" x2="${previa[0]}" y2="${previa[1]}" stroke="#e4572e" stroke-width="${2.5 * k}" stroke-dasharray="${6 * k} ${4 * k}"/>
         <circle cx="${previa[0]}" cy="${previa[1]}" r="${5 * k}" fill="#e4572e"/>
         <text x="${(u[0] + previa[0]) / 2}" y="${(u[1] + previa[1]) / 2 - 8 * k}" font-size="${12 * k}" text-anchor="middle" fill="#e4572e" font-weight="700">≈ ${Math.round(L).toLocaleString('pt-BR')}</text>`;
     }
@@ -621,16 +668,28 @@ function vEsboco() {
     const k = v.k, g = esbGeo(e);
     if (e.pts.length >= 3 && Math.hypot(w[0] - g.P[0][0], w[1] - g.P[0][1]) < 22 * k) return { p: g.P[0], fecha: true };
     if (!e.pts.length) return { p: [Math.round(w[0] / 50) * 50, Math.round(w[1] / 50) * 50] };
-    const u = g.P[g.n], dx = w[0] - u[0], dy = w[1] - u[1], L = Math.round(Math.hypot(dx, dy) / 10) * 10;
-    let ang = Math.atan2(dy, dx); const q = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4); if (Math.abs(ang - q) < 0.14) ang = q;
-    return { p: [u[0] + Math.cos(ang) * L, u[1] + Math.sin(ang) * L] };
+    const u = g.P[g.n], dx = w[0] - u[0], dy = w[1] - u[1]; let L = Math.round(Math.hypot(dx, dy) / 10) * 10;
+    let ang = Math.atan2(dy, dx), reto = false;
+    if (IMA90) {
+      // ímã: até 25° de folga a parede encaixa em 0/90/180/270°
+      const q = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2); if (Math.abs(ang - q) < 0.44) { ang = q; reto = true; }
+    } else { const q = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4); if (Math.abs(ang - q) < 0.14) ang = q; }
+    let p = [u[0] + Math.cos(ang) * L, u[1] + Math.sin(ang) * L];
+    // alinha com o primeiro canto para a última parede fechar em esquadro
+    if (reto && e.pts.length >= 2) {
+      const p0 = g.P[0], hor = Math.abs(Math.sin(ang)) < 1e-6, tol = 16 * k;
+      if (hor && Math.abs(p[0] - p0[0]) < tol) p = [p0[0], u[1]];
+      if (!hor && Math.abs(p[1] - p0[1]) < tol) p = [u[0], p0[1]];
+    }
+    return { p, reto };
   };
+  const txtDes = () => e.fechado ? 'Planta fechada — toque em Concluir para medir' : !e.pts.length ? 'Toque (ou arraste) no primeiro canto' : e.pts.length < 3 ? 'Toque o próximo canto' : 'Próximo canto — ou toque no ponto inicial para fechar';
   const consolidar = () => { const g = esbGeo(e); e.pts = g.P.slice(0, e.pts.length).map(p => p.slice()); };
   const addPonto = w => {
     const r = encaixar(w);
     if (r.fecha) { e.walls.push({ mm: null, o: null }); e.fechado = true; setModo('editar'); tocar(); selecionar({ t: 'w', i: 0 }); return; }
     if (e.pts.length) { consolidar(); e.walls.push({ mm: null, o: null }); }
-    e.pts.push(r.p); tocar(); desenha();
+    e.pts.push(r.p); tocar(); dica(txtDes()); desenha();
   };
   const perto = (w, soParedes) => {
     const g = esbGeo(e), tol = 18 * v.k;
@@ -654,8 +713,14 @@ function vEsboco() {
       if (pin && !pick) return { up: (_, m) => { if (!m) ir({ v: 'foto', p: rota.p, a: rota.a, f: pin.dataset.pin, de: 'esb', e: e.id }); } };
       if (pick) { const h = perto(w, true); if (h?.t !== 'w') return null; return { up: (w2) => { const g = esbGeo(e), [A, B] = [g.P[h.i], g.P[h.i + 1]]; pick.liga = { e: e.id, w: h.i, t: Math.max(0.05, Math.min(0.95, projT(w2, A, B))) }; tocar(); toast(`Foto ligada à parede ${h.i + 1}.`); ir({ v: 'foto', p: rota.p, a: rota.a, f: pick.id }); } }; }
       if (modo === 'desenhar') {
-        if (e.fechado) return null;
-        return { move: w2 => { previa = encaixar(w2).p; desenha(); }, up: w2 => { previa = null; addPonto(w2); }, cancel: () => { previa = null; desenha(); } };
+        // no modo desenho um dedo nunca move a tela; mover/zoom só com dois dedos
+        if (e.fechado) return { up: () => toast('Planta fechada. Toque em Concluir para medir.') };
+        const ini = !e.pts.length ? encaixar(w).p : null;
+        return {
+          move: (w2, moveu) => { if (ini && moveu && !e.pts.length) { e.pts.push(ini); } previa = encaixar(w2).p; desenha(); },
+          up: (w2, moveu) => { previa = null; if (ini && !moveu) { e.pts.length ? null : addPonto(w2); return; } addPonto(w2); },
+          cancel: () => { previa = null; desenha(); }
+        };
       }
       const h = perto(w); if (!h) return null;
       if (h.t === 'v') {
@@ -675,7 +740,7 @@ function vEsboco() {
     if (s.t === 'w') {
       const w = e.walls[s.i], g = esbGeo(e);
       bar.innerHTML = `<b>P${s.i + 1}</b><input id="emm" inputmode="decimal" class="alvo" value="${w.mm != null ? Math.round(w.mm) : ''}" placeholder="≈ ${Math.round(g.len[s.i])}"><span id="eori">${w.mm != null ? oTag(w.o) : ''}</span>
-        <button class="small btn2" data-ab="porta" aria-label="Porta">${ic('porta')}</button><button class="small btn2" data-ab="janela" aria-label="Janela">${ic('janela')}</button><button class="small btn2" id="eDiv" aria-label="Dividir">${ic('dividir')}</button><button class="small btn2" id="eOk" aria-label="Fechar">${ic('ok')}</button>`;
+        <button class="small btn2" data-ab="porta" aria-label="Porta">${ic('porta')}</button><button class="small btn2" data-ab="janela" aria-label="Janela">${ic('janela')}</button><button class="small btn2" id="eDiv" aria-label="Dividir">${ic('dividir')}</button><button class="small btnbad" id="eWx" aria-label="Excluir parede">${ic('lixo')}</button><button class="small btn2" id="eOk" aria-label="Fechar">${ic('ok')}</button>`;
       const inp = document.getElementById('emm');
       const grava = (val, o) => { w.mm = val; w.o = val == null ? null : o; tocar(); desenha(); document.getElementById('eori').innerHTML = val != null ? oTag(w.o) : ''; };
       alvo = { inp, aplicar: val => { inp.value = Math.round(val); grava(val, 'laser'); const nx = e.walls.findIndex((x, j) => j > s.i && x.mm == null); setTimeout(() => selecionar(nx >= 0 ? { t: 'w', i: nx } : s), 350); } };
@@ -687,6 +752,10 @@ function vEsboco() {
         tocar(); selecionar({ t: 'o', i: e.aberturas.length - 1 });
       });
       document.getElementById('eDiv').onclick = () => { dividirParede(e, s.i, a); tocar(); selecionar({ t: 'w', i: s.i }); };
+      document.getElementById('eWx').onclick = async () => {
+        if (!await confirmar(`Excluir a parede P${s.i + 1}?`)) return;
+        if (removerParede(e, s.i, a)) { tocar(); selecionar(null); } else toast('No meio do desenho, remova um ponto ou divida a parede.');
+      };
       document.getElementById('eOk').onclick = () => selecionar(null);
     } else if (s.t === 'v') {
       bar.innerHTML = `<b>Ponto ${s.i + 1}</b><span class="muted" style="flex:1">arraste para mover</span><button class="small btnbad" id="eVx">${ic('lixo')} Remover</button><button class="small btn2" id="eOk" aria-label="Fechar">${ic('ok')}</button>`;
@@ -711,9 +780,14 @@ function vEsboco() {
     const bar = document.getElementById('ebar');
     if (m === 'desenhar') {
       selecionar(null); bar.hidden = false;
-      bar.innerHTML = `<span class="muted" style="flex:1">${e.pts.length ? 'Toque o próximo canto. Feche tocando no ponto inicial.' : 'Toque o primeiro canto do cômodo.'}</span><button class="small btn2" id="eUndo">${ic('desfazer')} Desfazer</button>`;
+      bar.innerHTML = `<button class="small btn2${IMA90 ? ' on' : ''}" id="eIma" aria-pressed="${IMA90}">${ic('esquadro')} Ímã 90°</button><button class="small btn2" id="eUndo">${ic('desfazer')} Desfazer</button><button class="small btnbad" id="eLimpa">${ic('lixo')} Limpar</button>`;
+      document.getElementById('eIma').onclick = () => { IMA90 = !IMA90; setModo('desenhar'); };
+      document.getElementById('eLimpa').onclick = async () => {
+        if (!e.pts.length || !await confirmar('Apagar todo o desenho deste esboço (paredes, medidas, portas e janelas)?')) return;
+        e.pts = []; e.walls = []; e.fechado = false; e.aberturas = []; a.fotos.forEach(f => { if (f.liga?.e === e.id) delete f.liga; }); tocar(); setModo('desenhar');
+      };
       document.getElementById('eUndo').onclick = () => { if (e.fechado) { e.fechado = false; e.walls.pop(); } else if (e.pts.length) { e.pts.pop(); if (e.walls.length > Math.max(0, e.pts.length - 1)) e.walls.pop(); } tocar(); setModo('desenhar'); desenha(); };
-      dica('');
+      dica(txtDes());
     } else { bar.hidden = true; dica(e.pts.length && esbGeo(e).est.some(x => x) ? 'Toque numa parede e meça com o laser' : ''); }
     desenha();
   };
@@ -758,6 +832,18 @@ function dividirParede(e, i, a) {
     if (o) return (+o.dist || 0) < L / 2 ? { w: i } : { w: i + 1, dist: (+o.dist || 0) - L / 2 };
     return t < 0.5 ? { w: i, t: t * 2 } : { w: i + 1, t: (t - 0.5) * 2 };
   });
+}
+// Excluir parede: planta fechada abre nesse ponto; aberta só nas pontas.
+function removerParede(e, i, a) {
+  const n = nParedes(e), g = esbGeo(e);
+  e.pts = g.P.slice(0, e.pts.length).map(p => p.slice());
+  if (e.fechado) {
+    for (let r = 0; r < i + 1; r++) { e.pts.push(e.pts.shift()); e.walls.push(e.walls.shift()); remapear(a, e, w => ({ w: (w - 1 + n) % n })); }
+    e.fechado = false; e.walls.pop(); remapear(a, e, w => w === n - 1 ? null : { w }); return true;
+  }
+  if (i === 0) { e.pts.shift(); e.walls.shift(); remapear(a, e, w => w === 0 ? null : { w: w - 1 }); return true; }
+  if (i === n - 1) { e.pts.pop(); e.walls.pop(); remapear(a, e, w => w === n - 1 ? null : { w }); return true; }
+  return false;
 }
 function removerPonto(e, k, a) {
   const n = nParedes(e), g = esbGeo(e);
@@ -830,14 +916,19 @@ async function reduzir(file, max = 2000) {
 
 /* ---------- Seta de medida: linha, pontas de seta e etiqueta alinhada ---------- */
 // Tudo em unidades da imagem (W×H); k = unidades por pixel de tela, para manter traço e texto legíveis em qualquer zoom.
+const TIPOS_SETA = { L: ['Largura', '#e4572e'], A: ['Altura', '#2f6fd6'], P: ['Profundidade', '#1f9d6b'] };
+const CORES_SETA = ['#e4572e', '#2f6fd6', '#1f9d6b', '#e0a100', '#7b4fd6', '#1d1b18', '#ffffff'];
+const corSeta = s => s.cor || TIPOS_SETA[s.tipo]?.[1] || '#e4572e';
+const textoSobre = c => ['#ffffff', '#e0a100'].includes(c) ? '#1d1b18' : '#ffffff';
 function setaGeo(s, i, W, H, k) {
   const x1 = s.x1 * W, y1 = s.y1 * H, x2 = s.x2 * W, y2 = s.y2 * H;
   const L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L, nx = -uy, ny = ux;
   const hl = Math.min(12 * k, L / 3), hw = 5 * k;
   const ponta = (px, py, dx, dy) => [[px, py], [px - dx * hl + nx * hw, py - dy * hl + ny * hw], [px - dx * hl - nx * hw, py - dy * hl - ny * hw]];
   let ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
-  const txt = s.mm ? Math.round(s.mm).toLocaleString('pt-BR') + ' mm' : 'Seta ' + (i + 1), fs = 13 * k;
-  return { x1, y1, x2, y2, k, lw: 2.5 * k, heads: [ponta(x2, y2, ux, uy), ponta(x1, y1, -ux, -uy)],
+  const pre = s.tipo ? s.tipo + ' ' : '', txt = s.mm ? pre + Math.round(s.mm).toLocaleString('pt-BR') + ' mm' : (TIPOS_SETA[s.tipo]?.[0] || 'Seta ' + (i + 1)), fs = 13 * k;
+  const cor = corSeta(s);
+  return { x1, y1, x2, y2, k, lw: 2.5 * k, cor, tc: textoSobre(cor), heads: [ponta(x2, y2, ux, uy), ponta(x1, y1, -ux, -uy)],
     label: { x: (x1 + x2) / 2, y: (y1 + y2) / 2, ang, txt, fs, w: txt.length * fs * 0.6 + 12 * k, h: fs * 1.6, vazio: !s.mm } };
 }
 function setaSvg(g, sel, i) {
@@ -845,12 +936,12 @@ function setaSvg(g, sel, i) {
   return `<g data-s="${i}">
    <line x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" stroke="transparent" stroke-width="${22 * k}"/>
    <line x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" stroke="#000" stroke-opacity=".35" stroke-width="${g.lw + 2 * k}"/>
-   <line x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" stroke="${sel ? '#ff9b73' : '#e4572e'}" stroke-width="${g.lw}"/>
-   ${g.heads.map(h => `<polygon points="${pts(h)}" fill="${sel ? '#ff9b73' : '#e4572e'}" stroke="#000" stroke-opacity=".4" stroke-width="${k}"/>`).join('')}
+   <line x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}" stroke="${g.cor}" stroke-width="${sel ? g.lw * 1.6 : g.lw}"/>
+   ${g.heads.map(h => `<polygon points="${pts(h)}" fill="${g.cor}" stroke="#000" stroke-opacity=".4" stroke-width="${k}"/>`).join('')}
    <g transform="translate(${l.x} ${l.y}) rotate(${l.ang})">
-    <rect x="${-l.w / 2}" y="${-l.h / 2}" width="${l.w}" height="${l.h}" rx="${3 * k}" fill="${l.vazio ? '#fff' : '#e4572e'}" stroke="${sel ? '#1d1b18' : l.vazio ? '#e4572e' : 'rgba(0,0,0,.2)'}" stroke-width="${(sel ? 2 : 1) * k}"/>
-    <text y="${l.fs * 0.36}" font-size="${l.fs}" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-weight="700" fill="${l.vazio ? '#e4572e' : '#fff'}">${esc(l.txt)}</text></g>
-   ${sel ? [[g.x1, g.y1, 1], [g.x2, g.y2, 2]].map(([x, y, n]) => `<circle data-h="${n}" cx="${x}" cy="${y}" r="${11 * k}" fill="#fff" fill-opacity=".9" stroke="#e4572e" stroke-width="${2.5 * k}"/><circle cx="${x}" cy="${y}" r="${2 * k}" fill="#e4572e" pointer-events="none"/>`).join('') : ''}
+    <rect x="${-l.w / 2}" y="${-l.h / 2}" width="${l.w}" height="${l.h}" rx="${3 * k}" fill="${l.vazio ? '#fff' : g.cor}" stroke="${sel ? '#1d1b18' : l.vazio ? g.cor : 'rgba(0,0,0,.25)'}" stroke-width="${(sel ? 2 : 1) * k}"/>
+    <text y="${l.fs * 0.36}" font-size="${l.fs}" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-weight="700" fill="${l.vazio ? (g.cor === '#ffffff' ? '#1d1b18' : g.cor) : g.tc}">${esc(l.txt)}</text></g>
+   ${sel ? [[g.x1, g.y1, 1], [g.x2, g.y2, 2]].map(([x, y, n]) => `<circle data-h="${n}" cx="${x}" cy="${y}" r="${11 * k}" fill="#fff" fill-opacity=".9" stroke="${g.cor === '#ffffff' ? '#1d1b18' : g.cor}" stroke-width="${2.5 * k}"/><circle cx="${x}" cy="${y}" r="${2 * k}" fill="${g.cor === '#ffffff' ? '#1d1b18' : g.cor}" pointer-events="none"/>`).join('') : ''}
   </g>`;
 }
 
@@ -902,7 +993,13 @@ async function vFoto() {
     const s = f.setas[i];
     bar.hidden = false;
     bar.innerHTML = `<b>Seta ${i + 1}</b><input id="fmm" inputmode="decimal" value="${s.mm != null ? Math.round(s.mm) : ''}" placeholder="dispare o laser" class="alvo"><span class="muted">mm</span><span id="fori">${s.o ? oTag(s.o) : ''}</span>
-      <button class="small btnbad" id="fsx" aria-label="Excluir seta">${ic('lixo')}</button><button class="small btn2" id="fok" aria-label="Fechar">${ic('ok')}</button>`;
+      <button class="small btnbad" id="fsx" aria-label="Excluir seta">${ic('lixo')}</button><button class="small btn2" id="fok" aria-label="Fechar">${ic('ok')}</button>
+      <div class="linha2"><div class="seg">${Object.entries(TIPOS_SETA).map(([t, [nome, c]]) => `<button class="small${s.tipo === t ? ' on' : ''}" data-tipo="${t}" style="--c:${c}">${nome}</button>`).join('')}</div>
+      <button class="cor on" id="fcor" style="background:${corSeta(s)}" aria-label="Escolher cor"></button>
+      <div class="cores" id="fcores" hidden>${CORES_SETA.map(c => `<button class="cor${corSeta(s) === c ? ' on' : ''}" data-cor="${c}" style="background:${c}" aria-label="Cor"></button>`).join('')}</div></div>`;
+    document.getElementById('fcor').onclick = () => { const p = document.getElementById('fcores'); p.hidden = !p.hidden; };
+    bar.querySelectorAll('[data-tipo]').forEach(b => b.onclick = () => { s.tipo = b.dataset.tipo; delete s.cor; tocar(); selecionar(i); });
+    bar.querySelectorAll('[data-cor]').forEach(b => b.onclick = () => { s.cor = b.dataset.cor; tocar(); selecionar(i); });
     const inp = document.getElementById('fmm');
     const grava = (v, o) => { s.mm = v; s.o = v == null ? null : o; tocar(); document.getElementById('fori').innerHTML = s.o ? oTag(s.o) : ''; desenha(); };
     alvo = { inp, aplicar: v => { inp.value = Math.round(v); grava(v, 'laser'); } };
@@ -961,7 +1058,9 @@ async function vFoto() {
     else if (t.tipo === 'nova') {
       let a1 = t.a, b1 = t.b;
       if (!b1) { if (!pend) { pend = a1; desenha(); return; } b1 = a1; a1 = pend; pend = null; }
-      f.setas.push({ x1: a1[0], y1: a1[1], x2: b1[0], y2: b1[1], mm: null, o: null }); tocar(); setModo('ver'); selecionar(f.setas.length - 1);
+      // tipo sugerido pela direção: deitada = largura, em pé = altura (dá para trocar na barra)
+      const tipo = Math.abs((b1[0] - a1[0]) * W) >= Math.abs((b1[1] - a1[1]) * H) ? 'L' : 'A';
+      f.setas.push({ x1: a1[0], y1: a1[1], x2: b1[0], y2: b1[1], mm: null, o: null, tipo }); tocar(); setModo('ver'); selecionar(f.setas.length - 1);
     } else if (t.tipo === 'pan' && !t.moveu) {
       const agora = Date.now();
       if (agora - ultimoToque < 300) { zoomEm(z > 1.5 ? 1 : 2.5, t.p0[0], t.p0[1]); ultimoToque = 0; } else { ultimoToque = agora; if (sel != null) selecionar(null); }
@@ -1006,11 +1105,11 @@ function fotoComMedidas(img, f) {
     const g = setaGeo(s, i, c.width, c.height, k), l = g.label;
     ctx.lineCap = 'round';
     ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = g.lw + 2 * k; ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
-    ctx.strokeStyle = '#e4572e'; ctx.lineWidth = g.lw; ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
-    ctx.fillStyle = '#e4572e'; g.heads.forEach(h => { ctx.beginPath(); ctx.moveTo(...h[0]); ctx.lineTo(...h[1]); ctx.lineTo(...h[2]); ctx.closePath(); ctx.fill(); });
+    ctx.strokeStyle = g.cor; ctx.lineWidth = g.lw; ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
+    ctx.fillStyle = g.cor; g.heads.forEach(h => { ctx.beginPath(); ctx.moveTo(...h[0]); ctx.lineTo(...h[1]); ctx.lineTo(...h[2]); ctx.closePath(); ctx.fill(); });
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.ang * Math.PI / 180);
-    ctx.fillStyle = l.vazio ? '#fff' : '#e4572e'; ctx.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.strokeStyle = '#000'; ctx.lineWidth = k; ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h);
-    ctx.fillStyle = l.vazio ? '#e4572e' : '#fff'; ctx.font = `bold ${l.fs}px -apple-system,Helvetica,Arial,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(l.txt, 0, 0); ctx.restore();
+    ctx.fillStyle = l.vazio ? '#fff' : g.cor; ctx.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.strokeStyle = '#000'; ctx.lineWidth = k; ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h);
+    ctx.fillStyle = l.vazio ? (g.cor === '#ffffff' ? '#1d1b18' : g.cor) : g.tc; ctx.font = `bold ${l.fs}px -apple-system,Helvetica,Arial,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(l.txt, 0, 0); ctx.restore();
   });
   c.toBlob(b => baixar(`${proj().nome}_${area().nome}_foto.jpg`, b), 'image/jpeg', 0.9);
 }
@@ -1212,6 +1311,7 @@ function menuGeral() {
   const d = document.getElementById('dlg');
   d.innerHTML = `<b>Menu</b>
    <div style="display:grid;gap:8px;margin-top:10px">
+    ${navigator.standalone || matchMedia('(display-mode: standalone)').matches ? '' : '<button class="btn2" id="mInst">Instalar no iPhone</button>'}
     <button class="btn2" id="mi">Importar projeto (backup .json)</button>
     <button class="btn2" id="mt">Testar recepção (medida simulada)</button>
     <button class="btn2" id="md">Diagnóstico do Bluetooth</button>
@@ -1219,6 +1319,7 @@ function menuGeral() {
    <p class="muted">Esquadro · v0.3 · dados guardados só neste aparelho. ${S.leiturasSoltas.length ? S.leiturasSoltas.length + ' leitura(s) feitas fora de uma área.' : ''}</p>`;
   d.showModal();
   d.querySelector('#mf').onclick = () => d.close();
+  d.querySelector('#mInst')?.addEventListener('click', () => aviso('Instalar no iPhone', 'No <b>Safari</b>, toque em <b>Compartilhar</b> (o quadrado com a seta) e depois em <b>Adicionar à Tela de Início</b>. O Esquadro abre em tela cheia, com ícone próprio e funciona sem internet.<br><br>Para usar o laser por Bluetooth no iPhone, abra este mesmo endereço no navegador <b>Bluefy</b>.'));
   d.querySelector('#mi').onclick = () => { d.close(); escolherArquivo('.json,application/json', importarProjeto); };
   d.querySelector('#mt').onclick = () => { d.close(); const dv = new DataView(new ArrayBuffer(12)); [0xC0, 0x55, 0x10, 0x06].forEach((v, i) => dv.setUint8(i, v)); dv.setFloat32(7, 0.56815, true); pacote(dv); };
   d.querySelector('#md').onclick = () => { d.innerHTML = `<b>Pacotes recebidos do laser</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
