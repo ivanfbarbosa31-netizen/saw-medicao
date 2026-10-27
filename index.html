@@ -48,6 +48,12 @@ body.travado main{height:100%;overflow:hidden}
 .seg button.on{background:var(--c);color:#fff}
 .cores{display:flex;gap:6px;flex-basis:100%;justify-content:flex-end}
 .cores[hidden]{display:none}
+label.sw{display:flex;align-items:center;gap:10px;margin:10px 0;color:var(--tx);font-size:15px}
+label.sw input{width:20px;height:20px;flex:0 0 20px;accent-color:var(--acc)}
+.logoprev{height:52px;border:1px dashed var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden}
+.logoprev img{max-height:44px;max-width:100%}
+.notapill{position:absolute;left:12px;bottom:12px;max-width:70%;background:#efe4cc;color:#3a3631;border:1px solid #d7c49b;padding:7px 12px;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notapill[hidden]{display:none}
 .btn2.on{background:var(--tx);color:#fff;border-color:var(--tx)}
 .cor{width:24px;height:24px;padding:0;border-radius:50%;border:1px solid rgba(0,0,0,.2)}
 .cor.on{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--tx)}
@@ -163,7 +169,7 @@ let S = { projetos: [], leiturasSoltas: [] };
 const salvar = () => DB.put('kv', 'estado', S);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmm = v => v == null || v === '' || isNaN(v) ? '–' : Math.round(v).toLocaleString('pt-BR') + ' mm';
+const fmm = v => fL(v);
 const fdt = ts => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 const ORIG = { laser: ['✓', 'o-laser', 'laser'], manual: ['✎', 'o-manual', 'digitado'], importada: ['⇩', 'o-importada', 'importada'] };
 // Ícones de traço (24×24)
@@ -178,7 +184,7 @@ const IC = {
   ajustar: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>', menos: '<path d="M5 12h14"/>',
   desfazer: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>', link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
   regua: '<path d="M4 20V4h5v11h11v5z"/><path d="M4 8h2M4 12h2M8 20v-2M12 20v-2M16 20v-2"/>', altura: '<path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/>',
-  seta: '<path d="M5 19L19 5"/><path d="M5 13v6h6M13 5h6v6"/>', leituras: '<path d="M4 6h16M4 12h16M4 18h10"/>', baixar: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', esquadro: '<path d="M5 4v15h15"/><path d="M5 14h5v5"/>'
+  seta: '<path d="M5 19L19 5"/><path d="M5 13v6h6M13 5h6v6"/>', leituras: '<path d="M4 6h16M4 12h16M4 18h10"/>', baixar: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', esquadro: '<path d="M5 4v15h15"/><path d="M5 14h5v5"/>', texto: '<path d="M5 7V5h14v2M12 5v14M9 19h6"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24">${IC[n]}</svg>`;
 const oTag = o => { const x = ORIG[o] || ORIG.manual; return `<span class="${x[1]}" title="${x[2]}">${x[0]}</span>`; };
@@ -191,6 +197,7 @@ const proj = () => S.projetos.find(p => p.id === rota.p);
 const area = () => proj()?.areas.find(a => a.id === rota.a);
 function ir(r) { rota = r; alvo = null; render(); window.scrollTo(0, 0); }
 document.getElementById('voltar').onclick = () => {
+  if (rota.v === 'cfg') return ir(rota.volta || { v: 'home' });
   if (rota.v === 'foto' && rota.de === 'esb') ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
   else if (rota.v === 'esb' && rota.pick) ir({ v: 'foto', p: rota.p, a: rota.a, f: rota.pick });
   else if (['foto', 'esb', 'leituras'].includes(rota.v)) ir({ v: 'area', p: rota.p, a: rota.a });
@@ -208,6 +215,7 @@ async function render() {
   else if (rota.v === 'area') { t.textContent = proj().nome + ' · ' + area().nome; await vBase(); }
   else if (rota.v === 'esb') { const en = area().esbocos.find(x => x.id === rota.e)?.nome || 'esboço'; t.textContent = en === area().nome ? en + ' · esboço' : area().nome + ' · ' + en; vEsboco(); }
   else if (rota.v === 'leituras') { t.textContent = area().nome + ' · leituras'; vLeituras(); }
+  else if (rota.v === 'cfg') { t.textContent = 'Configurações'; vCfg(); }
   else if (rota.v === 'foto') { t.textContent = area().nome + ' · foto'; await vFoto(); }
   renderChips();
 }
@@ -246,6 +254,7 @@ function vProj() {
   <details class="card"><summary><b>Dados do cliente</b></summary>
     ${CAMPOS.map(([k, l]) => `<label>${l}</label><input data-k="${k}" value="${esc(p.cliente[k])}">`).join('')}
   </details>
+  <button id="pdfP" style="width:100%;margin-bottom:8px">${ic('baixar')} Gerar PDF do projeto</button>
   <div class="row"><button class="btn2" id="expP">Exportar projeto (backup)</button><button class="btn2" id="renP">Renomear</button></div>
   <div class="row" style="margin-top:8px"><button class="btnbad" id="delP">Excluir projeto</button></div>`;
   app.querySelectorAll('#areas .list-item').forEach(el => el.onclick = () => ir({ v: 'area', p: p.id, a: el.dataset.id }));
@@ -259,10 +268,11 @@ function vProj() {
   document.getElementById('renP').onclick = async () => { const n = await pedir('Renomear projeto', 'Nome', p.nome); if (n) { p.nome = n; tocar(); render(); } };
   document.getElementById('delP').onclick = async () => {
     if (!await confirmar(`Excluir “${p.nome}” e todas as medições e fotos? Não dá para desfazer.`)) return;
-    for (const a of p.areas) for (const f of [...a.fotos, ...(a.scans || [])]) await DB.del('fotos', f.id);
+    for (const a of p.areas) for (const f of blobsDaArea(a)) await DB.del('fotos', f.id);
     S.projetos = S.projetos.filter(x => x !== p); await salvar(); ir({ v: 'home' });
   };
   document.getElementById('expP').onclick = () => exportarProjeto(p);
+  document.getElementById('pdfP').onclick = () => gerarPDF(p).catch(err => aviso('Erro ao gerar PDF', esc(err.message)));
 }
 function tocar() { const p = proj(); if (p) p.alt = Date.now(); salvar(); }
 
@@ -414,19 +424,23 @@ const m3 = v => v == null ? '–' : (v / 1e9).toLocaleString('pt-BR', { maximumF
 // k = unidades do mundo por pixel de tela. op: {sel, selV, selO, cotas, alcas, previa, fotos}
 function svgEsboco(e, k, op = {}) {
   const g = esbGeo(e), out = [];
-  if (!g.n && !e.pts.length) return '';
-  const sw = 3.2 * k, fs = 11 * k;
+  if (!g.n && !e.pts.length && !e.fundo && !(e.textos || []).length) return '';
+  const sw = 3.2 * k, fs = 11 * k, fd = e.fundo, U = op.urls || URLS;
+  if (fd && op.fundo !== false) {
+    if (fd.img && U[fd.img]) out.push(`<image href="${U[fd.img]}" x="${fd.x}" y="${fd.y}" width="${fd.w}" height="${fd.h}" opacity="${fd.op ?? 0.55}" preserveAspectRatio="none"/>`);
+    if (fd.segs?.length) out.push(`<path d="${fd.segs.map(q => `M${q[0]} ${q[1]}L${q[2]} ${q[3]}`).join('')}" stroke="#6f675b" stroke-width="${1.3 * k}" fill="none" opacity="${fd.op ?? 0.55}"/>`);
+  }
   // cotas fora das paredes (✓ medida pelo laser, ✎ digitada, ⇩ importada, ≈ estimada pelo desenho)
   if (op.cotas !== false) for (let i = 0; i < g.n; i++) {
     const a = g.P[i], b = g.P[i + 1], [nx, ny] = normalFora(g, i), d = 22 * k;
     const A = [a[0] + nx * d, a[1] + ny * d], B = [b[0] + nx * d, b[1] + ny * d], w = e.walls[i] || {};
-    const tag = g.est[i] ? '≈' : w.o === 'laser' ? '✓' : w.o === 'importada' ? '⇩' : '✎';
+    const tag = g.est[i] ? '≈' : w.o === 'laser' ? '✓' : op.numeros ? '' : w.o === 'importada' ? '⇩' : '✎';
     const cor = g.est[i] ? '#a39a8c' : '#1d1b18', sel = op.sel === i;
     out.push(`<g class="cota" opacity="${sel ? 1 : 0.95}"><line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" stroke="${sel ? '#e4572e' : cor}" stroke-width="${k}"/>
       <line x1="${a[0] + nx * 8 * k}" y1="${a[1] + ny * 8 * k}" x2="${a[0] + nx * 28 * k}" y2="${a[1] + ny * 28 * k}" stroke="${cor}" stroke-width="${0.8 * k}"/>
       <line x1="${b[0] + nx * 8 * k}" y1="${b[1] + ny * 8 * k}" x2="${b[0] + nx * 28 * k}" y2="${b[1] + ny * 28 * k}" stroke="${cor}" stroke-width="${0.8 * k}"/>`);
     let ang = Math.atan2(B[1] - A[1], B[0] - A[0]) * 180 / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
-    const mx = (A[0] + B[0]) / 2 + nx * 9 * k, my = (A[1] + B[1]) / 2 + ny * 9 * k, txt = `${tag} ${Math.round(g.len[i]).toLocaleString('pt-BR')}`;
+    const mx = (A[0] + B[0]) / 2 + nx * 9 * k, my = (A[1] + B[1]) / 2 + ny * 9 * k, txt = `${tag} ${fN(g.len[i])}`;
     out.push(`<g transform="translate(${mx} ${my}) rotate(${ang})"><rect x="${-txt.length * fs * 0.32}" y="${-fs * 0.7}" width="${txt.length * fs * 0.64}" height="${fs * 1.4}" fill="${sel ? '#fde3d8' : '#fff'}" opacity=".9" rx="${2 * k}"/>
       <text y="${fs * 0.36}" font-size="${fs}" text-anchor="middle" fill="${sel ? '#e4572e' : cor}" font-weight="${g.est[i] ? 400 : 700}">${txt}</text></g></g>`);
   }
@@ -462,16 +476,17 @@ function svgEsboco(e, k, op = {}) {
     const [px, py] = pontoParede(g, f.liga.w, f.liga.t), [nx, ny] = normalFora(g, f.liga.w), r = 13 * k, c = [px - nx * r * 1.6, py - ny * r * 1.6], idc = 'c' + f.id;
     out.push(`<g data-pin="${f.id}"><clipPath id="${idc}"><circle cx="${c[0]}" cy="${c[1]}" r="${r}"/></clipPath>
       <circle cx="${c[0]}" cy="${c[1]}" r="${r + 1.5 * k}" fill="#fff" stroke="#e4572e" stroke-width="${1.5 * k}"/>
-      ${URLS[f.id] ? `<image href="${URLS[f.id]}" x="${c[0] - r}" y="${c[1] - r}" width="${2 * r}" height="${2 * r}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${idc})"/>` : ''}</g>`);
+      ${op.numeros ? `<text x="${c[0]}" y="${c[1] + r * 0.4}" font-size="${r * 1.15}" text-anchor="middle" font-weight="700" fill="#e4572e">${op.numeros[f.id] || ''}</text>` : URLS[f.id] ? `<image href="${URLS[f.id]}" x="${c[0] - r}" y="${c[1] - r}" width="${2 * r}" height="${2 * r}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${idc})"/>` : ''}</g>`);
   }
   // alças dos pontos
+  for (const t of e.textos || []) out.push(textoSvg(t.x, t.y, t.t, t.tam || 14 * k, `data-tx="${t.id}"`));
   if (op.alcas) e.pts.forEach((_, i) => { const p = g.P[i]; out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="${(op.selV === i ? 9 : 5.5) * k}" fill="${op.selV === i ? '#e4572e' : '#fff'}" stroke="#e4572e" stroke-width="${1.6 * k}"/>`); });
   if (op.previa) out.push(op.previa);
   return out.join('');
 }
 // miniaturas (object URL) das fotos, para as bolinhas e a base
 const URLS = {};
-async function carregarUrls(a) { for (const f of a.fotos) if (!URLS[f.id]) { const b = await DB.get('fotos', f.id); if (b) URLS[f.id] = URL.createObjectURL(b); } }
+async function carregarUrls(a) { for (const f of blobsDaArea(a)) if (!URLS[f.id]) { const b = await DB.get('fotos', f.id); if (b) URLS[f.id] = URL.createObjectURL(b); } }
 
 /* ===================== BASE da área: esboços, fotos, notas e scans juntos ===================== */
 async function vBase() {
@@ -504,10 +519,10 @@ async function vBase() {
       const c = caixaItem(it), o = it.o, ativo = mov && mov.it.o === o;
       const sombra = `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="${6 * k}" fill="#fff" stroke="${ativo ? '#e4572e' : '#ddd3c3'}" stroke-width="${(ativo ? 2.5 : 1) * k}"/>`;
       if (it.t === 'esboco') {
-        const g = esbGeo(o), xs = g.P.map(p => p[0]), ys = g.P.map(p => p[1]);
+        const bb = esbBounds(o);
         let inner = `<text x="${c.x + c.w / 2}" y="${c.y + c.h / 2}" font-size="${14 * k}" text-anchor="middle" fill="#a39a8c">Esboço vazio — toque para desenhar</text>`;
-        if (xs.length > 1) {
-          const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx || 1, bh = Math.max(...ys) - by || 1, s = Math.min(c.w * 0.74 / bw, c.h * 0.66 / bh);
+        if (bb) {
+          const bx = bb.x, by = bb.y, bw = bb.w, bh = bb.h, s = Math.min(c.w * 0.74 / bw, c.h * 0.66 / bh);
           const tx = c.x + c.w / 2 - (bx + bw / 2) * s, ty = c.y + c.h / 2 - (by + bh / 2) * s;
           tf[o.id] = { tx, ty, s, c };
           inner = `<g transform="translate(${tx} ${ty}) scale(${s})">${svgEsboco(o, c.w / 420 / s, { fotos: a.fotos, sel: lig?.e === o.id ? lig.w : null })}</g>`; // miniatura em escala, como se tivesse 420 px
@@ -515,7 +530,7 @@ async function vBase() {
         return `<g data-item="esboco:${o.id}">${sombra}${inner}<text x="${c.x + 8 * k}" y="${c.y + 16 * k}" font-size="${11 * k}" fill="#1d1b18" font-weight="700" class="m">${esc(o.nome.toUpperCase())}</text></g>`;
       }
       if (it.t === 'foto') return `<g data-item="foto:${o.id}">${sombra}${URLS[o.id] ? `<image href="${URLS[o.id]}" x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" preserveAspectRatio="none"/>` : ''}
-        <svg x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" viewBox="0 0 1000 ${1000 * (o.ar || 1.333)}" preserveAspectRatio="none" overflow="visible">${o.setas.map((s, i) => setaSvg(setaGeo(s, i, 1000, 1000 * (o.ar || 1.333), 1000 / 230), false, i)).join('')}</svg>
+        <svg x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" viewBox="0 0 1000 ${1000 * (o.ar || 1.333)}" preserveAspectRatio="none" overflow="visible">${o.setas.map((s, i) => setaSvg(setaGeo(s, i, 1000, 1000 * (o.ar || 1.333), 1000 / 230), false, i)).join('')}${(o.textos || []).map(t => textoSvg(t.x * 1000, t.y * 1000 * (o.ar || 1.333), t.t, 40, '')).join('')}</svg>
         ${o.liga ? `<g data-liga="1"><circle cx="${c.x + c.w - 13 * k}" cy="${c.y + 13 * k}" r="${10 * k}" fill="#e4572e" stroke="#fff" stroke-width="${1.5 * k}"/><svg x="${c.x + c.w - 19 * k}" y="${c.y + 7 * k}" width="${12 * k}" height="${12 * k}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round">${IC.link}</svg></g>` : ''}</g>`;
       if (it.t === 'nota') {
         const linhas = (o.texto || 'Nota vazia').split('\n').flatMap(l => l.match(/.{1,26}(\s|$)|.{1,26}/g) || ['']).slice(0, 7);
@@ -579,7 +594,7 @@ function menuAdicionar(a) {
   d.innerHTML = `<b>Criar novo</b><div class="grade4">
     <button class="btn2" data-n="esboco">${ic('lapis')}Esboço</button><button class="btn2" data-n="cam">${ic('camera')}Foto</button>
     <button class="btn2" data-n="gal">${ic('galeria')}Da galeria</button><button class="btn2" data-n="nota">${ic('nota')}Nota</button>
-    <button class="btn2" data-n="scan">${ic('cubo')}Scan 3D</button></div><button id="nf" style="width:100%;margin-top:10px">Fechar</button>`;
+    <button class="btn2" data-n="scan">${ic('cubo')}Scan 3D</button><button class="btn2" data-n="imp">${ic('baixar')}Importar planta</button></div><button id="nf" style="width:100%;margin-top:10px">Fechar</button>`;
   d.showModal(); d.querySelector('#nf').onclick = () => d.close();
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = async () => {
     d.close(); const n = b.dataset.n;
@@ -594,6 +609,13 @@ function menuAdicionar(a) {
       };
       if (n === 'cam') { const i = document.getElementById('fcam'); i.onchange = () => i.files[0] && add(i.files[0]); i.value = ''; i.click(); }
       else escolherArquivo('image/*', add);
+    } else if (n === 'imp') {
+      escolherArquivo('.dxf,.pdf,application/pdf,image/*', async file => {
+        const e = novoEsboco(file.name.replace(/\.[^.]+$/, '').slice(0, 40) || a.nome); a.esbocos.push(e); posicionarItens(a);
+        const r = await importarPlanta(a, e, file);
+        if (!r) { a.esbocos = a.esbocos.filter(x => x !== e); tocar(); return; }
+        await carregarUrls(a); ir({ v: 'esb', p: rota.p, a: rota.a, e: e.id, escala: r === 'imagem' });
+      });
     } else if (n === 'nota') {
       const o = { id: uid(), texto: '', pos: null }; a.notas.push(o); posicionarItens(a); tocar(); render(); editarNota(a, o);
     } else if (n === 'scan') {
@@ -624,13 +646,14 @@ async function abrirScan(a, o) {
 }
 function menuArea(a) {
   const d = document.getElementById('dlg');
-  d.innerHTML = `<b>${esc(a.nome)}</b><div style="display:grid;gap:8px;margin-top:10px"><button class="btn2" id="ar">Renomear área</button><button class="btn2" id="ao">Organizar itens</button><button class="btnbad" id="ax">Excluir área</button><button id="af">Fechar</button></div>`;
+  d.innerHTML = `<b>${esc(a.nome)}</b><div style="display:grid;gap:8px;margin-top:10px"><button class="btn2" id="aPdf">${ic('baixar')} PDF deste ambiente</button><button class="btn2" id="ar">Renomear área</button><button class="btn2" id="ao">Organizar itens</button><button class="btnbad" id="ax">Excluir área</button><button id="af">Fechar</button></div>`;
   d.showModal(); d.querySelector('#af').onclick = () => d.close();
+  d.querySelector('#aPdf').onclick = () => { d.close(); gerarPDF(proj(), a).catch(err => aviso('Erro ao gerar PDF', esc(err.message))); };
   d.querySelector('#ar').onclick = async () => { d.close(); const n = await pedir('Renomear área', 'Nome', a.nome); if (n) { a.nome = n; tocar(); render(); } };
   d.querySelector('#ao').onclick = () => { d.close(); itensDaArea(a).forEach(it => it.o.pos = null); a.esbocos.forEach((e, i) => e.pos = { x: i * 1300, y: 0, w: 1200 }); posicionarItens(a); tocar(); render(); };
   d.querySelector('#ax').onclick = async () => {
     d.close(); if (!await confirmar(`Excluir a área “${a.nome}” com esboços, fotos e notas?`)) return;
-    for (const f of [...a.fotos, ...a.scans]) await DB.del('fotos', f.id);
+    for (const f of blobsDaArea(a)) await DB.del('fotos', f.id);
     const p = proj(); p.areas = p.areas.filter(x => x !== a); tocar(); ir({ v: 'proj', p: p.id });
   };
 }
@@ -644,8 +667,8 @@ function vEsboco() {
   const pick = rota.pick ? a.fotos.find(f => f.id === rota.pick) : null;
   app.innerHTML = `
   <div class="ftool">${pick ? '<b style="font-size:14px">Toque na parede da foto</b>' : `<button class="small" id="eDes">${ic('lapis')} Desenhar</button><button class="small btn2" id="eAlt">${ic('altura')} Altura</button>`}
-   <span style="flex:1"></span>${KIT_ZOOM}${pick ? '' : `<button class="small btn2" id="eInfo" aria-label="Informações">${ic('info')}</button>`}</div>
-  <div class="board"><svg id="esvg" class="vsvg esb"><g class="cam"><g id="egrid"></g><g id="edes"></g></g></svg><div class="fdica" id="edica" hidden></div></div>
+   <span style="flex:1"></span>${KIT_ZOOM}${pick ? '' : `<button class="small btn2" id="eMais" aria-label="Mais opções">${ic('mais')}</button>`}</div>
+  <div class="board"><svg id="esvg" class="vsvg esb"><g class="cam"><g id="egrid"></g><g id="edes"></g><g id="emark"></g></g></svg><div class="fdica" id="edica" hidden></div><button class="notapill" id="eNotaP" hidden></button></div>
   <div id="ebar" class="fbar" hidden></div>`;
   const svg = document.getElementById('esvg'), gg = document.getElementById('egrid'), gd = document.getElementById('edes');
   let modo = !e.pts.length && !pick ? 'desenhar' : 'editar', sel = null, previa = null, hover = null, mira = null;
@@ -671,7 +694,7 @@ function vEsboco() {
       }
       pv += `<line x1="${u[0]}" y1="${u[1]}" x2="${previa[0]}" y2="${previa[1]}" stroke="#e4572e" stroke-width="${2.5 * k}" stroke-dasharray="${6 * k} ${4 * k}"/>
         <circle cx="${previa[0]}" cy="${previa[1]}" r="${5 * k}" fill="#e4572e"/>
-        <text x="${(u[0] + previa[0]) / 2}" y="${(u[1] + previa[1]) / 2 - 8 * k}" font-size="${12 * k}" text-anchor="middle" fill="#e4572e" font-weight="700">≈ ${Math.round(L).toLocaleString('pt-BR')}</text>`;
+        <text x="${(u[0] + previa[0]) / 2}" y="${(u[1] + previa[1]) / 2 - 8 * k}" font-size="${12 * k}" text-anchor="middle" fill="#e4572e" font-weight="700">≈ ${fN(L)}</text>`;
     }
     if (modo === 'desenhar' && e.pts.length >= 3 && !e.fechado) { const p = esbGeo(e).P[0]; pv += `<circle cx="${p[0]}" cy="${p[1]}" r="${14 * k}" fill="none" stroke="#0f5e59" stroke-width="${2 * k}" stroke-dasharray="${3 * k} ${2 * k}"/>`; }
     if (modo === 'desenhar' && e.pts.length === 0 && previa) pv = `<circle cx="${previa[0]}" cy="${previa[1]}" r="${5 * k}" fill="#e4572e"/>`;
@@ -743,6 +766,20 @@ function vEsboco() {
         };
       }
       if (pick) { const h = perto(w, true); if (h?.t !== 'w') return null; return { up: (w2) => { const g = esbGeo(e), [A, B] = [g.P[h.i], g.P[h.i + 1]]; pick.liga = { e: e.id, w: h.i, t: Math.max(0.05, Math.min(0.95, projT(w2, A, B))) }; tocar(); toast(`Foto ligada à parede ${h.i + 1}.`); ir({ v: 'foto', p: rota.p, a: rota.a, f: pick.id }); } }; }
+      if (modo === 'escala') return { up: (w2, m) => { if (m) return; ESC.pts.push(w2); marcar(); if (ESC.pts.length === 2) concluirEscala(); } };
+      if (modo === 'fundo') {
+        if (!e.fundo) return null; const o0 = { x: e.fundo.x, y: e.fundo.y, segs: e.fundo.segs?.map(q => q.slice()) };
+        return { move: (w2, m) => { if (!m) return; moverFundo(e, o0, w2[0] - w[0], w2[1] - w[1]); desenha(); }, up: (_, m) => { if (m) tocar(); } };
+      }
+      const txEl = tgt.closest?.('[data-tx]');
+      if (txEl && modo !== 'desenhar') {
+        const t = (e.textos || []).find(x => x.id === txEl.dataset.tx), x0 = t.x, y0 = t.y;
+        return {
+          move: (w2, m) => { if (!m) return; t.x = x0 + w2[0] - w[0]; t.y = y0 + w2[1] - w[1]; desenha(); },
+          up: async (_, m) => { if (m) return tocar(); const r = await editarTexto('Texto na planta', t, () => { e.textos = e.textos.filter(x => x !== t); tocar(); desenha(); }); if (r) { t.t = r; tocar(); desenha(); } }
+        };
+      }
+      if (modo === 'texto') return { up: async (w2, m) => { if (m) return; const r = await editarTexto('Texto na planta', null); if (r) { (e.textos ??= []).push({ id: uid(), x: Math.round(w2[0]), y: Math.round(w2[1]), t: r, tam: Math.round(14 * v.k) }); tocar(); } modo = 'editar'; setModo('editar'); } };
       if (modo === 'desenhar') {
         // no modo desenho um dedo nunca move a tela; mover/zoom só com dois dedos
         if (e.fechado) return { up: () => toast('Planta fechada. Toque em Concluir para medir.') };
@@ -780,8 +817,8 @@ function vEsboco() {
       inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(isNaN(val) ? null : val, 'manual'); };
       inp.onkeydown = ev => { if (ev.key === 'Enter') inp.blur(); };
       bar.querySelectorAll('[data-ab]').forEach(b => b.onclick = () => {
-        const L = esbGeo(e).len[s.i], larg = b.dataset.ab === 'porta' ? 900 : 1000;
-        e.aberturas.push({ tipo: b.dataset.ab, parede: s.i, dist: Math.max(0, Math.round((L - larg) / 2)), larg, alt: b.dataset.ab === 'porta' ? 2110 : 1000, peit: b.dataset.ab === 'porta' ? 0 : 1000 });
+        const L = esbGeo(e).len[s.i], larg = b.dataset.ab === 'porta' ? S.cfg.porta.larg : S.cfg.janela.larg;
+        e.aberturas.push({ tipo: b.dataset.ab, parede: s.i, dist: Math.max(0, Math.round((L - larg) / 2)), larg, alt: b.dataset.ab === 'porta' ? S.cfg.porta.alt : S.cfg.janela.alt, peit: b.dataset.ab === 'porta' ? 0 : S.cfg.janela.peit });
         tocar(); selecionar({ t: 'o', i: e.aberturas.length - 1 });
       });
       document.getElementById('eDiv').onclick = () => { dividirParede(e, s.i, a); tocar(); selecionar({ t: 'w', i: s.i }); };
@@ -825,9 +862,8 @@ function vEsboco() {
     desenha();
   };
   const ajustar = () => {
-    const g = esbGeo(e);
-    if (g.P.length < 2) { v.enquadrar({ x: -3000, y: -2500, w: 6000, h: 5000 }); return; }
-    const xs = g.P.map(p => p[0]), ys = g.P.map(p => p[1]), b = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    const b = esbBounds(e);
+    if (!b) { v.enquadrar({ x: -3000, y: -2500, w: 6000, h: 5000 }); return; }
     const m = Math.max(b.w, b.h) * 0.12 + 300; v.enquadrar({ x: b.x - m, y: b.y - m, w: b.w + 2 * m, h: b.h + 2 * m }, 0.02);
   };
   ligarZoom(app, v, ajustar); ajustar();
@@ -842,10 +878,59 @@ function vEsboco() {
       inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(isNaN(val) ? null : val, 'manual'); };
       document.getElementById('eOk').onclick = () => selecionar(null);
     };
-    document.getElementById('eInfo').onclick = () => infoEsboco(a, e);
+    document.getElementById('eMais').onclick = () => menuEsboco();
   }
   setModo(modo);
   if (pick) dica('Toque na parede onde a foto foi tirada');
+  function marcar() {
+    const k = v.k, P = ESC.pts;
+    document.getElementById('emark').innerHTML = P.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${7 * k}" fill="#2f6fd6" stroke="#fff" stroke-width="${2 * k}"/>`).join('')
+      + (P.length === 2 ? `<line x1="${P[0][0]}" y1="${P[0][1]}" x2="${P[1][0]}" y2="${P[1][1]}" stroke="#2f6fd6" stroke-width="${2 * k}" stroke-dasharray="${5 * k} ${4 * k}"/>` : '');
+  }
+  function modoEsp(m, txt) {
+    setModo('editar'); modo = m; ESC.pts = []; marcar();
+    const bar = document.getElementById('ebar'); bar.hidden = false;
+    bar.innerHTML = `<span class="muted" style="flex:1">${txt}</span><button class="small btn2" id="eCan">${m === 'fundo' ? ic('ok') + ' Concluir' : 'Cancelar'}</button>`;
+    dica(''); document.getElementById('eCan').onclick = () => { modo = 'editar'; ESC.pts = []; marcar(); setModo('editar'); };
+  }
+  async function concluirEscala() {
+    const [p1, p2] = ESC.pts, d = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const r = await pedir('Dimensionar planta', `Medida real entre os dois pontos, em mm (no desenho: ${Math.round(d)} mm)`);
+    const real = parseFloat(String(r || '').replace(',', '.'));
+    ESC.pts = []; marcar(); modo = 'editar'; setModo('editar');
+    if (!(real > 0) || !(d > 0)) return toast('Dimensionamento cancelado.');
+    escalarFundo(e, p1, real / d); tocar(); ajustar(); toast(`Escala ajustada: ${Math.round(real)} mm entre os pontos.`);
+  }
+  function mostrarNota() {
+    const b = document.getElementById('eNotaP'); if (!b) return;
+    b.hidden = !e.nota; b.innerHTML = e.nota ? `${ic('nota')} ${esc(e.nota.split('\n')[0].slice(0, 40))}` : '';
+    b.onclick = () => editarNotaEsboco(e, mostrarNota);
+  }
+  function menuEsboco() {
+    const d = document.getElementById('dlg'), fd = e.fundo;
+    d.innerHTML = `<b>${esc(e.nome)}</b><div style="display:grid;gap:8px;margin-top:10px">
+      <button class="btn2" id="mInfo">${ic('info')} Informações e DXF</button>
+      <button class="btn2" id="mTxt">${ic('texto')} Adicionar texto na planta</button>
+      <button class="btn2" id="mNota">${ic('nota')} ${e.nota ? 'Editar nota da planta' : 'Nota da planta'}</button>
+      <button class="btn2" id="mImp">${ic('baixar')} Importar planta (DXF, PDF ou imagem)</button>
+      ${fd ? `<button class="btn2" id="mEsc">${ic('regua')} Dimensionar fundo (2 pontos)</button>
+      <button class="btn2" id="mMov">${ic('ajustar')} Mover fundo</button>
+      <button class="btn2" id="mOp">Transparência do fundo: ${Math.round((fd.op ?? 0.55) * 100)}%</button>
+      <button class="btnbad" id="mFx">${ic('lixo')} Remover fundo</button>` : ''}
+      <button id="mF">Fechar</button></div>`;
+    d.showModal(); const q = x => d.querySelector(x);
+    q('#mF').onclick = () => d.close();
+    q('#mInfo').onclick = () => { d.close(); infoEsboco(a, e); };
+    q('#mTxt').onclick = () => { d.close(); modoEsp('texto', 'Toque onde quer colocar o texto'); };
+    q('#mNota').onclick = () => { d.close(); editarNotaEsboco(e, mostrarNota); };
+    q('#mImp').onclick = () => { d.close(); escolherArquivo('.dxf,.pdf,application/pdf,image/*', async file => { const r = await importarPlanta(a, e, file); if (!r) return; await carregarUrls(a); ir({ v: 'esb', p: rota.p, a: rota.a, e: e.id, escala: r === 'imagem' }); }); };
+    q('#mEsc')?.addEventListener('click', () => { d.close(); modoEsp('escala', 'Toque nos 2 pontos de uma medida conhecida do fundo'); });
+    q('#mMov')?.addEventListener('click', () => { d.close(); modoEsp('fundo', 'Arraste para posicionar o fundo'); });
+    q('#mOp')?.addEventListener('click', () => { const o = [0.3, 0.55, 0.8], i = o.indexOf(fd.op ?? 0.55); fd.op = o[(i + 1) % o.length]; tocar(); desenha(); d.close(); menuEsboco(); });
+    q('#mFx')?.addEventListener('click', async () => { d.close(); if (!await confirmar('Remover o fundo importado desta planta?')) return; await removerFundoImg(e); delete e.fundo; tocar(); desenha(); });
+  }
+  if (!pick) mostrarNota();
+  if (rota.escala && e.fundo) { rota.escala = false; modoEsp('escala', 'Fundo importado: toque nos 2 pontos de uma medida conhecida para dimensionar'); }
   carregarUrls(a).then(desenha);
 }
 function distSeg(p, a, b) { const t = projT(p, a, b), q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; return Math.hypot(p[0] - q[0], p[1] - q[1]); }
@@ -959,7 +1044,7 @@ function setaGeo(s, i, W, H, k) {
   const hl = Math.min(12 * k, L / 3), hw = 5 * k;
   const ponta = (px, py, dx, dy) => [[px, py], [px - dx * hl + nx * hw, py - dy * hl + ny * hw], [px - dx * hl - nx * hw, py - dy * hl - ny * hw]];
   let ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
-  const pre = s.tipo ? s.tipo + ' ' : '', txt = s.mm ? pre + Math.round(s.mm).toLocaleString('pt-BR') + ' mm' : (TIPOS_SETA[s.tipo]?.[0] || 'Seta ' + (i + 1)), fs = 13 * k;
+  const pre = s.tipo ? s.tipo + ' ' : '', txt = s.mm ? pre + fL(s.mm) : (TIPOS_SETA[s.tipo]?.[0] || 'Seta ' + (i + 1)), fs = 13 * k;
   const cor = corSeta(s);
   return { x1, y1, x2, y2, k, lw: 2.5 * k, cor, tc: textoSobre(cor), heads: [ponta(x2, y2, ux, uy), ponta(x1, y1, -ux, -uy)],
     label: { x: (x1 + x2) / 2, y: (y1 + y2) / 2, ang, txt, fs, w: txt.length * fs * 0.6 + 12 * k, h: fs * 1.6, vazio: !s.mm } };
@@ -984,7 +1069,7 @@ async function vFoto() {
   const blob = await DB.get('fotos', f.id);
   app.innerHTML = `
   <div class="ftool">
-    <button id="fadd" class="small btn2">${ic('seta')} Seta</button>
+    <button id="fadd" class="small btn2">${ic('seta')} Seta</button><button id="ftx" class="small btn2">${ic('texto')} Texto</button>
     <span style="flex:1"></span>
     <button id="fzo" class="small btn2" aria-label="Diminuir zoom">${ic('menos')}</button><button id="fzi" class="small btn2" aria-label="Aumentar zoom">${ic('add')}</button><button id="fzf" class="small btn2" aria-label="Ajustar">${ic('ajustar')}</button>
     <button id="fmais" class="small btn2" aria-label="Mais">${ic('mais')}</button>
@@ -999,6 +1084,7 @@ async function vFoto() {
     const k = W / (bw * z || 1);
     svg.innerHTML = f.setas.map((s, i) => i === sel ? '' : setaSvg(setaGeo(s, i, W, H, k), false, i)).join('')
       + (sel != null && f.setas[sel] ? setaSvg(setaGeo(f.setas[sel], sel, W, H, k), true, sel) : '')
+      + (f.textos || []).map(t => textoSvg(t.x * W, t.y * H, t.t, 15 * k, `data-ft="${t.id}"`)).join('')
       + (pend ? `<circle cx="${pend[0] * W}" cy="${pend[1] * H}" r="${7 * k}" fill="#e4572e" stroke="#000" stroke-width="${1.5 * k}"/>` : '');
   };
   const agenda = () => { if (!rafId) rafId = requestAnimationFrame(() => { rafId = 0; desenha(); }); };
@@ -1042,8 +1128,8 @@ async function vFoto() {
     document.getElementById('fok').onclick = () => selecionar(null);
   };
   const setModo = m => {
-    modo = m; pend = null; document.getElementById('fadd').classList.toggle('btn2', m !== 'add');
-    dica(m === 'add' ? 'Arraste do início ao fim da medida (ou toque nos dois pontos)' : ''); desenha();
+    modo = m; pend = null; document.getElementById('fadd').classList.toggle('btn2', m !== 'add'); document.getElementById('ftx').classList.toggle('btn2', m !== 'texto');
+    dica(m === 'add' ? 'Arraste do início ao fim da medida (ou toque nos dois pontos)' : m === 'texto' ? 'Toque onde quer colocar o texto' : ''); desenha();
   };
 
   // Gestos: 2 dedos = zoom/mover; 1 dedo = arrastar ponta/seta, desenhar (modo +Seta) ou mover a foto.
@@ -1056,8 +1142,10 @@ async function vFoto() {
       if (pend && modo === 'add') pend = null;
       return;
     }
-    const p = local(e), alvoEl = e.target.closest('[data-h],[data-s]');
-    if (alvoEl?.dataset.h && sel != null) g = { tipo: 'ponta', n: +alvoEl.dataset.h, p0: p };
+    const p = local(e), alvoEl = e.target.closest('[data-h],[data-s]'), ftEl = e.target.closest('[data-ft]');
+    if (ftEl && modo !== 'add') { const t = f.textos.find(x => x.id === ftEl.dataset.ft); g = { tipo: 'txt', t, p0: p, x0: t.x, y0: t.y, moveu: false }; }
+    else if (modo === 'texto') g = { tipo: 'novotxt', p0: p, moveu: false };
+    else if (alvoEl?.dataset.h && sel != null) g = { tipo: 'ponta', n: +alvoEl.dataset.h, p0: p };
     else if (modo === 'add') g = { tipo: 'nova', a: norm(p), p0: p };
     else if (alvoEl?.dataset.s != null) g = { tipo: 'seta', i: +alvoEl.closest('[data-s]').dataset.s, p0: p, orig: { ...f.setas[+alvoEl.closest('[data-s]').dataset.s] }, moveu: false };
     else g = { tipo: 'pan', p0: p, tx0: tx, ty0: ty, moveu: false };
@@ -1076,6 +1164,9 @@ async function vFoto() {
       const dx = (p[0] - g.p0[0]) / (bw * z), dy = (p[1] - g.p0[1]) / (bh * z);
       if (Math.hypot(p[0] - g.p0[0], p[1] - g.p0[1]) > 6) g.moveu = true;
       if (g.moveu && g.i === sel) { const s = f.setas[g.i], o = g.orig; s.x1 = o.x1 + dx; s.y1 = o.y1 + dy; s.x2 = o.x2 + dx; s.y2 = o.y2 + dy; agenda(); }
+    } else if (g.tipo === 'txt' || g.tipo === 'novotxt') {
+      if (Math.hypot(p[0] - g.p0[0], p[1] - g.p0[1]) > 6) g.moveu = true;
+      if (g.tipo === 'txt' && g.moveu) { g.t.x = Math.max(0, Math.min(1, g.x0 + (p[0] - g.p0[0]) / (bw * z))); g.t.y = Math.max(0, Math.min(1, g.y0 + (p[1] - g.p0[1]) / (bh * z))); agenda(); }
     } else if (g.tipo === 'pan') {
       if (Math.hypot(p[0] - g.p0[0], p[1] - g.p0[1]) > 6) g.moveu = true;
       tx = g.tx0 + p[0] - g.p0[0]; ty = g.ty0 + p[1] - g.p0[1]; limitar(); aplicarT();
@@ -1094,6 +1185,12 @@ async function vFoto() {
       // tipo sugerido pela direção: deitada = largura, em pé = altura (dá para trocar na barra)
       const tipo = Math.abs((b1[0] - a1[0]) * W) >= Math.abs((b1[1] - a1[1]) * H) ? 'L' : 'A';
       f.setas.push({ x1: a1[0], y1: a1[1], x2: b1[0], y2: b1[1], mm: null, o: null, tipo }); tocar(); setModo('ver'); selecionar(f.setas.length - 1);
+    } else if (t.tipo === 'txt') {
+      if (t.moveu) { tocar(); desenha(); }
+      else editarTexto('Texto na foto', t.t, () => { f.textos = f.textos.filter(x => x !== t.t); tocar(); desenha(); }).then(r => { if (r) { t.t.t = r; tocar(); desenha(); } });
+    } else if (t.tipo === 'novotxt') {
+      if (t.moveu) return; const pos = norm(t.p0);
+      editarTexto('Texto na foto', null).then(r => { if (r) { (f.textos ??= []).push({ id: uid(), x: pos[0], y: pos[1], t: r }); tocar(); } setModo('ver'); });
     } else if (t.tipo === 'pan' && !t.moveu) {
       const agora = Date.now();
       if (agora - ultimoToque < 300) { zoomEm(z > 1.5 ? 1 : 2.5, t.p0[0], t.p0[1]); ultimoToque = 0; } else { ultimoToque = agora; if (sel != null) selecionar(null); }
@@ -1103,6 +1200,7 @@ async function vFoto() {
   fv.addEventListener('wheel', e => { e.preventDefault(); const p = local(e); zoomEm(z * Math.exp(-e.deltaY / 300), p[0], p[1]); }, { passive: false });
 
   document.getElementById('fadd').onclick = () => { selecionar(null); setModo(modo === 'add' ? 'ver' : 'add'); };
+  document.getElementById('ftx').onclick = () => { selecionar(null); setModo(modo === 'texto' ? 'ver' : 'texto'); };
   document.getElementById('fzi').onclick = () => zoomEm(z * 1.5, fv.clientWidth / 2, fv.clientHeight / 2);
   document.getElementById('fzo').onclick = () => zoomEm(z / 1.5, fv.clientWidth / 2, fv.clientHeight / 2);
   document.getElementById('fzf').onclick = ajustar;
@@ -1131,19 +1229,8 @@ async function vFoto() {
   if (!f.setas.length) setModo('add');
   window.onresize = () => rota.v === 'foto' && ajustar();
 }
-function fotoComMedidas(img, f) {
-  const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
-  const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0); const k = c.width / 700;
-  f.setas.forEach((s, i) => {
-    const g = setaGeo(s, i, c.width, c.height, k), l = g.label;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = g.lw + 2 * k; ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
-    ctx.strokeStyle = g.cor; ctx.lineWidth = g.lw; ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
-    ctx.fillStyle = g.cor; g.heads.forEach(h => { ctx.beginPath(); ctx.moveTo(...h[0]); ctx.lineTo(...h[1]); ctx.lineTo(...h[2]); ctx.closePath(); ctx.fill(); });
-    ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.ang * Math.PI / 180);
-    ctx.fillStyle = l.vazio ? '#fff' : g.cor; ctx.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.strokeStyle = '#000'; ctx.lineWidth = k; ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h);
-    ctx.fillStyle = l.vazio ? (g.cor === '#ffffff' ? '#1d1b18' : g.cor) : g.tc; ctx.font = `bold ${l.fs}px -apple-system,Helvetica,Arial,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(l.txt, 0, 0); ctx.restore();
-  });
+async function fotoComMedidas(img, f) {
+  const c = await canvasFoto(f); if (!c) return;
   c.toBlob(b => baixar(`${proj().nome}_${area().nome}_foto.jpg`, b), 'image/jpeg', 0.9);
 }
 /* ===================== Campo-alvo do laser ===================== */
@@ -1248,7 +1335,7 @@ function dxf(e, tres) {
 }
 async function exportarProjeto(p) {
   const fotos = {};
-  for (const a of p.areas) for (const f of [...a.fotos, ...(a.scans || [])]) { const b = await DB.get('fotos', f.id); if (b) fotos[f.id] = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); }
+  for (const a of p.areas) for (const f of blobsDaArea(a)) { const b = await DB.get('fotos', f.id); if (b) fotos[f.id] = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); }
   baixar(`${p.nome}.nycxo-medida.json`, JSON.stringify({ formato: 'nycxo-medida', versao: 1, exportado: new Date().toISOString(), projeto: p, fotos }), 'application/json');
 }
 async function importarProjeto(f) {
@@ -1345,24 +1432,387 @@ function menuGeral() {
   d.innerHTML = `<b>Menu</b>
    <div style="display:grid;gap:8px;margin-top:10px">
     ${navigator.standalone || matchMedia('(display-mode: standalone)').matches ? '' : '<button class="btn2" id="mInst">Instalar no iPhone</button>'}
+    <button class="btn2" id="mCfg">Configurações</button>
     <button class="btn2" id="mi">Importar projeto (backup .json)</button>
     <button class="btn2" id="mt">Testar recepção (medida simulada)</button>
     <button class="btn2" id="md">Diagnóstico do Bluetooth</button>
     <button id="mf">Fechar</button></div>
-   <p class="muted">NYCXO Medida · v0.5 · ferramenta de apoio do NYCXO · dados guardados só neste aparelho. ${S.leiturasSoltas.length ? S.leiturasSoltas.length + ' leitura(s) feitas fora de uma área.' : ''}</p>`;
+   <p class="muted">NYCXO Medida · v0.6 · ferramenta de apoio do NYCXO · dados guardados só neste aparelho. ${S.leiturasSoltas.length ? S.leiturasSoltas.length + ' leitura(s) feitas fora de uma área.' : ''}</p>`;
   d.showModal();
   d.querySelector('#mf').onclick = () => d.close();
   d.querySelector('#mInst')?.addEventListener('click', () => aviso('Instalar no iPhone', 'No <b>Safari</b>, toque em <b>Compartilhar</b> (o quadrado com a seta) e depois em <b>Adicionar à Tela de Início</b>. O NYCXO Medida abre em tela cheia, com ícone próprio e funciona sem internet.<br><br>Para usar o laser por Bluetooth no iPhone, abra este mesmo endereço no navegador <b>Bluefy</b>.'));
+  d.querySelector('#mCfg').onclick = () => { d.close(); const volta = { ...rota }; ir({ v: 'cfg', volta }); };
   d.querySelector('#mi').onclick = () => { d.close(); escolherArquivo('.json,application/json', importarProjeto); };
   d.querySelector('#mt').onclick = () => { d.close(); const dv = new DataView(new ArrayBuffer(12)); [0xC0, 0x55, 0x10, 0x06].forEach((v, i) => dv.setUint8(i, v)); dv.setFloat32(7, 0.56815, true); pacote(dv); };
   d.querySelector('#md').onclick = () => { d.innerHTML = `<b>Pacotes recebidos do laser</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
 }
+
+/* ===================== Configurações ===================== */
+const CFG_PADRAO = {
+  unid: 'mm', dec: 0, empresa: '', logo: null, usarLogo: true,
+  pdf: { cliente: true, planta: true, info: true, paredes: true, fotos: true, notas: true, leituras: false },
+  fotosPag: 2, qualidade: 'media', porta: { larg: 900, alt: 2110 }, janela: { larg: 1000, alt: 1000, peit: 1000 }
+};
+function normalizarCfg() {
+  const c = S.cfg || {};
+  S.cfg = { ...CFG_PADRAO, ...c, pdf: { ...CFG_PADRAO.pdf, ...(c.pdf || {}) }, porta: { ...CFG_PADRAO.porta, ...(c.porta || {}) }, janela: { ...CFG_PADRAO.janela, ...(c.janela || {}) } };
+}
+const UN = { mm: [1, 'mm'], cm: [10, 'cm'], m: [1000, 'm'] };
+// número no formato escolhido (dados sempre em mm)
+function fN(v) { const c = S.cfg || CFG_PADRAO, d = (UN[c.unid] || UN.mm)[0]; return (v / d).toLocaleString('pt-BR', { minimumFractionDigits: c.dec, maximumFractionDigits: c.dec }); }
+function fL(v) { return v == null || v === '' || isNaN(v) ? '–' : fN(+v) + ' ' + (UN[(S.cfg || CFG_PADRAO).unid] || UN.mm)[1]; }
+async function logoPNG(file) {
+  const bmp = await createImageBitmap(file), k = Math.min(1, 500 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); return c.toDataURL('image/png');
+}
+function vCfg() {
+  const c = S.cfg, chk = (k, l) => `<label class="sw"><input type="checkbox" data-pdf="${k}" ${c.pdf[k] ? 'checked' : ''}><span>${l}</span></label>`;
+  const num = (k, l) => { const [g, f] = k.split('.'); return `<div><label>${l}</label><input data-ab="${k}" inputmode="decimal" value="${c[g][f]}"></div>`; };
+  app.innerHTML = `
+  <div class="card"><b>Empresa</b>
+   <label>Nome no relatório PDF</label><input id="cEmp" value="${esc(c.empresa)}" placeholder="Nome da empresa">
+   <label>Logotipo</label>
+   <div class="row"><div class="logoprev">${c.logo ? `<img src="${c.logo}" alt="Logotipo">` : '<span class="muted">sem logotipo</span>'}</div>
+    <button class="btn2 small" id="cLogo" style="flex:0 0 auto">Escolher</button>${c.logo ? '<button class="btnbad small" id="cLogoX" style="flex:0 0 auto">Remover</button>' : ''}</div>
+   <label class="sw"><input type="checkbox" id="cUsar" ${c.usarLogo ? 'checked' : ''}><span>Usar logotipo no PDF</span></label></div>
+  <div class="card"><b>Unidades e formatação</b>
+   <div class="row"><div><label>Comprimento</label><select id="cUn">${Object.keys(UN).map(u => `<option ${c.unid === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+    <div><label>Casas decimais</label><select id="cDec">${[0, 1, 2, 3].map(n => `<option ${c.dec === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>
+   <p class="muted">Exemplo: <b>${fL(2335.4)}</b>. As medidas continuam sendo digitadas em mm.</p></div>
+  <div class="card"><b>Incluir no PDF</b>
+   ${chk('cliente', 'Dados do cliente')}${chk('planta', 'Planta com cotas')}${chk('info', 'Informações do cômodo')}${chk('paredes', 'Lista de paredes, portas e janelas')}${chk('fotos', 'Fotos com medidas')}${chk('notas', 'Notas')}${chk('leituras', 'Leituras do laser')}
+   <div class="row"><div><label>Fotos por página</label><select id="cFp">${[1, 2, 4].map(n => `<option ${c.fotosPag === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div><label>Qualidade da imagem</label><select id="cQ">${[['baixa', 'Baixa'], ['media', 'Média'], ['alta', 'Alta']].map(([v, l]) => `<option value="${v}" ${c.qualidade === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div></div>
+  <div class="card"><b>Medidas padrão de aberturas (mm)</b>
+   <div class="row">${num('porta.larg', 'Porta — largura')}${num('porta.alt', 'Porta — altura')}</div>
+   <div class="row">${num('janela.larg', 'Janela — largura')}${num('janela.alt', 'Janela — altura')}${num('janela.peit', 'Peitoril')}</div></div>
+  <p class="muted" style="text-align:center">NYCXO Medida · v0.6 · ferramenta de apoio do NYCXO</p>`;
+  const grava = () => { salvar(); };
+  document.getElementById('cEmp').onchange = ev => { c.empresa = ev.target.value.trim(); grava(); };
+  document.getElementById('cUsar').onchange = ev => { c.usarLogo = ev.target.checked; grava(); };
+  document.getElementById('cUn').onchange = ev => { c.unid = ev.target.value; grava(); render(); };
+  document.getElementById('cDec').onchange = ev => { c.dec = +ev.target.value; grava(); render(); };
+  document.getElementById('cFp').onchange = ev => { c.fotosPag = +ev.target.value; grava(); };
+  document.getElementById('cQ').onchange = ev => { c.qualidade = ev.target.value; grava(); };
+  app.querySelectorAll('[data-pdf]').forEach(i => i.onchange = () => { c.pdf[i.dataset.pdf] = i.checked; grava(); });
+  app.querySelectorAll('[data-ab]').forEach(i => i.onchange = () => { const [g, f] = i.dataset.ab.split('.'), v = parseFloat(i.value.replace(',', '.')); if (!isNaN(v) && v > 0) { c[g][f] = Math.round(v); grava(); } else i.value = c[g][f]; });
+  document.getElementById('cLogo').onclick = () => escolherArquivo('image/*', async f => { c.logo = await logoPNG(f); grava(); render(); });
+  document.getElementById('cLogoX')?.addEventListener('click', () => { c.logo = null; grava(); render(); });
+}
+
+/* ===================== Texto livre (planta e foto) ===================== */
+function textoSvg(x, y, txt, fs, attr, cor = '#1d1b18') {
+  const ls = String(txt).split('\n');
+  return `<text ${attr} x="${x}" y="${y - (ls.length - 1) * fs * 0.6}" font-size="${fs}" font-weight="700" text-anchor="middle" fill="${cor}" stroke="#fffdf9" stroke-width="${fs * 0.28}" stroke-linejoin="round" paint-order="stroke" font-family="-apple-system,Helvetica,Arial,sans-serif">${ls.map((l, i) => `<tspan x="${x}" dy="${i ? fs * 1.2 : 0}">${esc(l)}</tspan>`).join('')}</text>`;
+}
+function editarTexto(titulo, t, aoExcluir) {
+  return new Promise(ok => {
+    const d = document.getElementById('dlg');
+    d.innerHTML = `<b>${esc(titulo)}</b><textarea id="ttx" rows="3" placeholder="Ex.: tomada 220V, ponto de água, gás…">${esc(t?.t || '')}</textarea>
+     <div class="row" style="margin-top:10px">${aoExcluir ? '<button class="btnbad" id="tx">Excluir</button>' : ''}<button class="btn2" id="tc">Cancelar</button><button id="tk">Salvar</button></div>`;
+    d.showModal(); const ta = d.querySelector('#ta') || d.querySelector('#ttx'); ta.focus();
+    d.querySelector('#tc').onclick = () => { d.close(); ok(null); };
+    d.querySelector('#tk').onclick = () => { d.close(); ok(ta.value.trim() || null); };
+    d.querySelector('#tx')?.addEventListener('click', () => { d.close(); aoExcluir(); ok(null); });
+  });
+}
+function editarNotaEsboco(e, depois) {
+  const d = document.getElementById('dlg');
+  d.innerHTML = `<b>Nota da planta — ${esc(e.nome)}</b><textarea id="nt" rows="8" placeholder="Observações desta planta: interferências, pontos de água, gás, elétrica…">${esc(e.nota || '')}</textarea>
+   <div class="row" style="margin-top:10px">${e.nota ? '<button class="btnbad" id="nx">Apagar</button>' : ''}<button id="nk">Salvar</button></div>`;
+  d.showModal(); const t = d.querySelector('#nt'); t.focus();
+  d.querySelector('#nk').onclick = () => { e.nota = t.value.trim(); tocar(); d.close(); depois?.(); };
+  d.querySelector('#nx')?.addEventListener('click', () => { e.nota = ''; tocar(); d.close(); depois?.(); });
+}
+
+/* ===================== Limites do esboço (paredes, fundo e textos) ===================== */
+function esbBounds(e, comFundo = true) {
+  const xs = [], ys = [], g = esbGeo(e);
+  g.P.forEach(p => { xs.push(p[0]); ys.push(p[1]); });
+  (e.textos || []).forEach(t => { xs.push(t.x); ys.push(t.y); });
+  if (comFundo && e.fundo) {
+    if (e.fundo.img) { xs.push(e.fundo.x, e.fundo.x + e.fundo.w); ys.push(e.fundo.y, e.fundo.y + e.fundo.h); }
+    (e.fundo.segs || []).forEach(s => { xs.push(s[0], s[2]); ys.push(s[1], s[3]); });
+  }
+  if (xs.length < 2) return null;
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x || 1, h: Math.max(...ys) - y || 1 };
+}
+
+/* ===================== Importar planta: DXF, PDF ou imagem ===================== */
+const LIBS = {
+  pdfjs: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  pdfjsWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+};
+function carregarScript(src) {
+  return new Promise((ok, err) => {
+    const ja = document.querySelector(`script[src="${src}"]`);
+    if (ja) { if (ja.dataset.ok) return ok(); ja.addEventListener('load', ok); ja.addEventListener('error', () => err(new Error('rede'))); return; }
+    const s = document.createElement('script'); s.src = src; s.onload = () => { s.dataset.ok = 1; ok(); }; s.onerror = () => { s.remove(); err(new Error('rede')); };
+    document.head.appendChild(s);
+  });
+}
+// DXF ASCII: LINE, LWPOLYLINE e POLYLINE/VERTEX da seção ENTITIES; resultado em mm, y para baixo.
+function lerDxf(txt) {
+  const L = txt.split(/\r?\n/), P = [];
+  for (let i = 0; i + 1 < L.length; i += 2) P.push([parseInt(L[i], 10), L[i + 1].trim()]);
+  let ins = 0;
+  for (let i = 0; i < P.length; i++) if (P[i][0] === 9 && P[i][1] === '$INSUNITS') { for (let j = i + 1; j < i + 4 && j < P.length; j++) if (P[j][0] === 70) { ins = +P[j][1]; break; } }
+  const ents = []; let sec = null, cur = null;
+  for (let i = 0; i < P.length; i++) {
+    const [c, v] = P[i];
+    if (c === 0 && v === 'SECTION') { sec = P[i + 1]?.[0] === 2 ? P[i + 1][1] : null; continue; }
+    if (c === 0 && v === 'ENDSEC') { sec = null; cur = null; continue; }
+    if (sec !== 'ENTITIES') continue;
+    if (c === 0) { cur = { t: v, d: [] }; ents.push(cur); } else if (cur) cur.d.push([c, v]);
+  }
+  const brutos = [], add = (a, b, ly) => brutos.push({ x1: a[0], y1: a[1], z1: a[2] || 0, x2: b[0], y2: b[1], z2: b[2] || 0, ly });
+  const val = (d, c) => { const p = d.find(x => x[0] === c); return p ? parseFloat(p[1]) : 0; };
+  const camada = d => (d.find(x => x[0] === 8) || [0, ''])[1];
+  for (let i = 0; i < ents.length; i++) {
+    const en = ents[i];
+    if (en.t === 'LINE') add([val(en.d, 10), val(en.d, 20), val(en.d, 30)], [val(en.d, 11), val(en.d, 21), val(en.d, 31)], camada(en.d));
+    else if (en.t === 'LWPOLYLINE') {
+      const vs = []; let cv = null;
+      for (const [c, v] of en.d) { if (c === 10) { cv = [parseFloat(v), 0, 0]; vs.push(cv); } else if (c === 20 && cv) cv[1] = parseFloat(v); }
+      for (let j = 0; j + 1 < vs.length; j++) add(vs[j], vs[j + 1], camada(en.d));
+      if ((val(en.d, 70) & 1) && vs.length > 2) add(vs[vs.length - 1], vs[0], camada(en.d));
+    } else if (en.t === 'POLYLINE') {
+      const vs = [], fech = val(en.d, 70) & 1;
+      for (let j = i + 1; j < ents.length && ents[j].t !== 'SEQEND'; j++) if (ents[j].t === 'VERTEX') vs.push([val(ents[j].d, 10), val(ents[j].d, 20), val(ents[j].d, 30)]);
+      for (let j = 0; j + 1 < vs.length; j++) add(vs[j], vs[j + 1], camada(en.d));
+      if (fech && vs.length > 2) add(vs[vs.length - 1], vs[0], camada(en.d));
+    }
+  }
+  // planta 3D: fica só o que está no chão (z = 0)
+  let segs = brutos;
+  if (segs.some(s => Math.abs(s.z1) < 1e-6 && Math.abs(s.z2) < 1e-6)) segs = segs.filter(s => Math.abs(s.z1) < 1e-6 && Math.abs(s.z2) < 1e-6);
+  const xs = segs.flatMap(s => [s.x1, s.x2]), ys = segs.flatMap(s => [s.y1, s.y2]);
+  const ext = xs.length ? Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) : 0;
+  const f = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 }[ins] || (ext < 200 ? 1000 : 1);
+  const mm = segs.map(s => ({ a: [s.x1 * f, -s.y1 * f], b: [s.x2 * f, -s.y2 * f], ly: s.ly })).filter(s => Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) >= 1);
+  const ehParede = s => /parede|wall|mur/i.test(s.ly);
+  return { segs: mm, paredes: mm.filter(ehParede), outros: mm.filter(s => !ehParede(s)), fator: f };
+}
+// Junta segmentos numa única sequência de paredes (aberta ou fechada); null se não formarem uma corrente.
+function encadear(segs, tol = 3) {
+  if (segs.length < 1) return null;
+  const perto = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) <= tol, livre = segs.slice(1), path = [segs[0].a, segs[0].b];
+  let mudou = true;
+  while (livre.length && mudou) {
+    mudou = false;
+    for (let i = 0; i < livre.length; i++) {
+      const s = livre[i], fim = path[path.length - 1], ini = path[0];
+      if (perto(s.a, fim)) path.push(s.b); else if (perto(s.b, fim)) path.push(s.a);
+      else if (perto(s.b, ini)) path.unshift(s.a); else if (perto(s.a, ini)) path.unshift(s.b);
+      else continue;
+      livre.splice(i, 1); mudou = true; break;
+    }
+  }
+  if (livre.length) return null;
+  const fechado = path.length > 3 && perto(path[0], path[path.length - 1]);
+  const pts = fechado ? path.slice(0, -1) : path, n = fechado ? pts.length : pts.length - 1, lens = [];
+  for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; lens.push(Math.hypot(b[0] - a[0], b[1] - a[1])); }
+  return { pts: pts.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]), fechado, lens };
+}
+async function pdfParaCanvas(file) {
+  await carregarScript(LIBS.pdfjs);
+  const lib = window.pdfjsLib; lib.GlobalWorkerOptions.workerSrc = LIBS.pdfjsWorker;
+  const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  let n = 1;
+  if (doc.numPages > 1) { const r = await pedir('Página do PDF', `O arquivo tem ${doc.numPages} páginas. Qual importar?`, '1'); n = Math.max(1, Math.min(doc.numPages, parseInt(r, 10) || 1)); }
+  const pg = await doc.getPage(n), v0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: Math.min(4, 2400 / Math.max(v0.width, v0.height)) });
+  const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  await pg.render({ canvasContext: g, viewport: vp }).promise;
+  return { canvas: c, papelMM: v0.width / 72 * 25.4 };
+}
+// Retorna 'paredes' (DXF virou paredes), 'linhas' (DXF como fundo) ou 'imagem' (PDF/imagem como fundo, precisa dimensionar).
+async function importarPlanta(a, e, file) {
+  const nome = file.name.toLowerCase();
+  if (nome.endsWith('.dxf')) {
+    const r = lerDxf(await file.text());
+    if (!r.segs.length) { aviso('DXF sem linhas', 'Não encontrei linhas (LINE ou polilinhas) neste arquivo.'); return null; }
+    const cad = !e.pts.length ? encadear(r.paredes.length ? r.paredes : r.segs, 3) : null;
+    if (cad) {
+      e.pts = cad.pts; e.fechado = cad.fechado; e.walls = cad.lens.map(mm => ({ mm: Math.round(mm), o: 'importada' }));
+      const resto = r.paredes.length ? r.outros : [];
+      if (resto.length) e.fundo = { segs: resto.map(s => [s.a[0], s.a[1], s.b[0], s.b[1]]), op: 0.55 }; else if (e.fundo?.segs) delete e.fundo;
+      tocar(); toast(`${e.walls.length} paredes importadas do DXF.`); return 'paredes';
+    }
+    await removerFundoImg(e);
+    e.fundo = { segs: r.segs.map(s => [s.a[0], s.a[1], s.b[0], s.b[1]]), op: 0.55 };
+    tocar(); toast('DXF importado como fundo — desenhe as paredes por cima.'); return 'linhas';
+  }
+  let canvas, larguraMM = 6000;
+  if (nome.endsWith('.pdf') || file.type === 'application/pdf') {
+    try { const r = await pdfParaCanvas(file); canvas = r.canvas; larguraMM = Math.round(r.papelMM * 50); }
+    catch (err) { aviso('Não consegui abrir o PDF', err.message === 'rede' ? 'Na primeira vez é preciso internet para carregar o leitor de PDF.' : esc(err.message)); return null; }
+  } else {
+    const bmp = await createImageBitmap(file), k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    canvas = document.createElement('canvas'); canvas.width = Math.round(bmp.width * k); canvas.height = Math.round(bmp.height * k);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  }
+  const blob = await new Promise(ok => canvas.toBlob(ok, 'image/jpeg', 0.85)), id = uid();
+  await DB.put('fotos', id, blob); await removerFundoImg(e); URLS[id] = URL.createObjectURL(blob);
+  const b = esbBounds(e, false), w = larguraMM, h = w * canvas.height / canvas.width, cx = b ? b.x + b.w / 2 : 0, cy = b ? b.y + b.h / 2 : 0;
+  e.fundo = { img: id, x: cx - w / 2, y: cy - h / 2, w, h, op: 0.55 };
+  tocar(); return 'imagem';
+}
+async function removerFundoImg(e) { if (e.fundo?.img) { await DB.del('fotos', e.fundo.img); delete URLS[e.fundo.img]; } }
+function escalarFundo(e, p, f) {
+  const fd = e.fundo; if (!fd) return;
+  const S2 = (x, y) => [p[0] + (x - p[0]) * f, p[1] + (y - p[1]) * f];
+  if (fd.img) { [fd.x, fd.y] = S2(fd.x, fd.y); fd.w *= f; fd.h *= f; }
+  if (fd.segs) fd.segs = fd.segs.map(s => [...S2(s[0], s[1]), ...S2(s[2], s[3])]);
+}
+function moverFundo(e, orig, dx, dy) {
+  const fd = e.fundo; if (!fd) return;
+  if (fd.img) { fd.x = orig.x + dx; fd.y = orig.y + dy; }
+  if (orig.segs) fd.segs = orig.segs.map(s => [s[0] + dx, s[1] + dy, s[2] + dx, s[3] + dy]);
+}
+const blobsDaArea = a => [...a.fotos, ...(a.scans || []), ...a.esbocos.filter(e => e.fundo?.img).map(e => ({ id: e.fundo.img }))];
+
+/* ===================== Relatório PDF por ambiente ===================== */
+// texto para as fontes padrão do PDF (Latin-1)
+const san = s => String(s ?? '').replace(/≈/g, '~').replace(/[✓✔✎⇩]/g, '').replace(/[–—]/g, '-').replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/…/g, '...').replace(/[^\x00-\xFF]/g, '');
+async function esbocoPNG(e, fotos = [], W = 1800) {
+  const b = esbBounds(e, false); if (!b) return null;
+  const base = Math.max(b.w, b.h * 1.1), k = base / 900, m = 70 * k, X = b.x - m, Y = b.y - m, Wd = b.w + 2 * m, Hd = b.h + 2 * m;
+  let H = Math.round(W * Hd / Wd); if (H > 2400) { W = Math.round(W * 2400 / H); H = 2400; }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${X} ${Y} ${Wd} ${Hd}" font-family="Helvetica, Arial, sans-serif"><rect x="${X}" y="${Y}" width="${Wd}" height="${Hd}" fill="#ffffff"/>${svgEsboco(e, k, { fotos, fundo: false, numeros: Object.fromEntries(fotos.map(f => [f.id, f._n])) })}</svg>`;
+  const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  await img.decode();
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H);
+  return { url: c.toDataURL('image/png'), w: W, h: H };
+}
+// desenha setas e textos de uma foto num canvas do tamanho da imagem
+function desenharMedidas(ctx, f, W, H) {
+  const k = Math.max(W, H) / 520;
+  f.setas.forEach((s, i) => {
+    const g = setaGeo(s, i, W, H, k), l = g.label;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = g.lw + 2 * k; ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
+    ctx.strokeStyle = g.cor; ctx.lineWidth = g.lw; ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
+    ctx.fillStyle = g.cor; g.heads.forEach(h => { ctx.beginPath(); ctx.moveTo(...h[0]); ctx.lineTo(...h[1]); ctx.lineTo(...h[2]); ctx.closePath(); ctx.fill(); });
+    ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.ang * Math.PI / 180);
+    ctx.fillStyle = l.vazio ? '#fff' : g.cor; ctx.fillRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.strokeStyle = '#000'; ctx.lineWidth = k; ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h);
+    ctx.fillStyle = l.vazio ? (g.cor === '#ffffff' ? '#1d1b18' : g.cor) : g.tc; ctx.font = `bold ${l.fs}px -apple-system,Helvetica,Arial,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(l.txt, 0, 0); ctx.restore();
+  });
+  (f.textos || []).forEach(t => {
+    const fs = 15 * k, ls = String(t.t).split('\n'), x = t.x * W, y0 = t.y * H - (ls.length - 1) * fs * 0.6;
+    ctx.font = `bold ${fs}px -apple-system,Helvetica,Arial,sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    ls.forEach((l, i) => { const y = y0 + i * fs * 1.2; ctx.strokeStyle = '#fffdf9'; ctx.lineWidth = fs * 0.28; ctx.strokeText(l, x, y); ctx.fillStyle = '#1d1b18'; ctx.fillText(l, x, y); });
+  });
+}
+async function canvasFoto(f, max = 4000) {
+  const b = await DB.get('fotos', f.id); if (!b) return null;
+  const bmp = await createImageBitmap(b), k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  const ctx = c.getContext('2d'); ctx.drawImage(bmp, 0, 0, c.width, c.height); desenharMedidas(ctx, f, c.width, c.height);
+  return c;
+}
+async function gerarPDF(p, soArea) {
+  toast('Gerando PDF…', 5000);
+  try { await carregarScript(LIBS.jspdf); }
+  catch (_) { return aviso('Sem internet', 'Na primeira vez é preciso internet para carregar o gerador de PDF. Depois ele fica guardado no aparelho.'); }
+  const c = S.cfg, { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  const PW = 210, PH = 297, M = 14, CW = PW - 2 * M, T = san;
+  const Q = { baixa: [1200, 0.6], media: [1800, 0.75], alta: [2600, 0.88] }[c.qualidade] || [1800, 0.75];
+  const ORIG_TXT = { laser: 'laser', manual: 'digitada', importada: 'importada' };
+  let y = 0, pag = 0;
+  const cor = (r, g, b) => doc.setTextColor(r, g, b);
+  const cab = () => {
+    pag++; if (pag > 1) doc.addPage(); y = M; let x = M;
+    if (c.usarLogo && c.logo) { try { const pr = doc.getImageProperties(c.logo), h = 12, w = Math.min(42, h * pr.width / pr.height); doc.addImage(c.logo, 'PNG', x, y - 1, w, h); x += w + 4; } catch (_) { } }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); cor(29, 27, 24); if (c.empresa) doc.text(T(c.empresa), x, y + 5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); cor(133, 124, 111);
+    doc.text(T(p.nome), PW - M, y + 4, { align: 'right' }); doc.text(new Date().toLocaleDateString('pt-BR'), PW - M, y + 9, { align: 'right' });
+    y += 15; doc.setDrawColor(228, 220, 207); doc.setLineWidth(0.3); doc.line(M, y, PW - M, y); y += 6;
+  };
+  const precisa = h => { if (y + h > PH - 16) cab(); };
+  const titulo = (s, tam = 14) => { precisa(tam * 0.5 + 10); doc.setFont('helvetica', 'bold'); doc.setFontSize(tam); cor(29, 27, 24); doc.text(T(s), M, y + tam * 0.35); y += tam * 0.45 + 4; };
+  const kv = (k, v) => {
+    precisa(7); doc.setFont('helvetica', 'normal'); doc.setFontSize(10); cor(70, 65, 58); doc.text(T(k), M, y + 4);
+    doc.setFont('helvetica', 'bold'); cor(29, 27, 24); doc.text(T(v), PW - M, y + 4, { align: 'right' });
+    doc.setDrawColor(238, 232, 222); doc.line(M, y + 6, PW - M, y + 6); y += 7;
+  };
+  const texto = s => { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); cor(70, 65, 58); for (const l of doc.splitTextToSize(T(s), CW)) { precisa(5); doc.text(l, M, y + 4); y += 5; } y += 2; };
+  const areas = soArea ? [soArea] : p.areas;
+  // capa
+  cab();
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(22); cor(29, 27, 24); doc.text(T(p.nome), M, y + 8); y += 13;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11); cor(133, 124, 111); doc.text(T(soArea ? `Relatório de medição — ${soArea.nome}` : 'Relatório de medição'), M, y + 2); y += 10;
+  if (c.pdf.cliente) { const cl = CAMPOS.filter(([k]) => p.cliente?.[k]); if (cl.length) { titulo('Cliente', 12); cl.forEach(([k, l]) => kv(l, p.cliente[k])); y += 4; } }
+  titulo('Ambientes', 12);
+  areas.forEach(a => { const ar = a.esbocos.reduce((s, e) => s + (esbGeo(e).area || 0), 0); kv(a.nome, `${a.esbocos.length} planta(s) · ${a.fotos.length} foto(s)${ar ? ' · ' + m2(ar) : ''}`); });
+  for (const a of areas) {
+    cab(); titulo(a.nome, 16);
+    for (const e of a.esbocos) {
+      if (a.esbocos.length > 1 || e.nome !== a.nome) titulo(e.nome, 12);
+      if (c.pdf.planta && e.pts.length > 1) {
+        a.fotos.forEach((f, i) => { f._n = i + 1; }); const im = await esbocoPNG(e, a.fotos).catch(() => null); a.fotos.forEach(f => delete f._n);
+        if (im) { let w = CW, h = CW * im.h / im.w; if (h > 150) { h = 150; w = h * im.w / im.h; } precisa(h + 4); doc.addImage(im.url, 'PNG', M + (CW - w) / 2, y, w, h); y += h + 5; }
+      }
+      const I = esbInfo(e), g = I.g;
+      if (c.pdf.info && g.n) {
+        const est = g.todasMedidas ? '' : ' (estimado)';
+        kv('Área do piso', m2(g.area) + (g.area != null ? est : '')); kv('Perímetro', fL(g.per) + est); kv('Pé-direito', fL(e.altura));
+        kv('Área bruta de parede', m2(I.bruta)); kv('Área líquida de parede', m2(I.liquida)); kv('Volume', m3(I.volume));
+        kv('Portas / janelas', `${e.aberturas.filter(o => o.tipo === 'porta').length} / ${e.aberturas.filter(o => o.tipo !== 'porta').length}`); y += 3;
+      }
+      if (c.pdf.paredes && g.n) {
+        titulo('Paredes', 11);
+        for (let i = 0; i < g.n; i++) kv(`P${i + 1}`, `${fL(g.len[i])} · ${g.est[i] ? 'estimada' : ORIG_TXT[e.walls[i]?.o] || 'digitada'}`);
+        e.aberturas.forEach((o, j) => kv(`${o.tipo === 'porta' ? 'Porta' : 'Janela'} ${j + 1} · parede P${+o.parede + 1}`, `${fL(o.larg)} x ${fL(o.alt)}${o.tipo !== 'porta' ? ' · peitoril ' + fL(o.peit) : ''} · a ${fL(o.dist)} do canto`));
+        y += 3;
+      }
+      if (c.pdf.notas) {
+        if (e.nota) { titulo('Nota da planta', 11); texto(e.nota); }
+        if ((e.textos || []).length) { titulo('Textos na planta', 11); e.textos.forEach(t => texto('• ' + t.t.replace(/\n/g, ' '))); }
+      }
+    }
+    if (c.pdf.notas && a.notas.some(n => n.texto?.trim())) { titulo('Notas', 12); a.notas.filter(n => n.texto?.trim()).forEach(n => texto(n.texto)); }
+    if (c.pdf.fotos && a.fotos.length) {
+      titulo('Fotos', 12);
+      const n = c.fotosPag, cols = n === 4 ? 2 : 1, gap = 6, cw = (CW - (cols - 1) * gap) / cols, maxH = n === 1 ? 185 : n === 2 ? 100 : 88;
+      let col = 0, linhaH = 0;
+      for (const [i, f] of a.fotos.entries()) {
+        const cv = await canvasFoto(f, Q[0]).catch(() => null); if (!cv) continue;
+        let w = cw, h = cw * cv.height / cv.width; if (h > maxH) { h = maxH; w = h * cv.width / cv.height; }
+        const esb = a.esbocos.find(x => x.id === f.liga?.e);
+        doc.setFontSize(9);
+        const leg = [T(`Foto ${i + 1}${esb ? ` · ${esb.nome}, parede P${f.liga.w + 1}` : ''}`),
+          ...doc.splitTextToSize(T(f.setas.filter(s => s.mm != null).map((s, j) => `${TIPOS_SETA[s.tipo]?.[0] || 'Seta ' + (j + 1)}: ${fL(s.mm)}`).join('   ')), cw)];
+        const bloco = h + 4 + leg.length * 4.3;
+        if (col === 0) precisa(bloco);
+        const x0 = M + col * (cw + gap);
+        doc.addImage(cv.toDataURL('image/jpeg', Q[1]), 'JPEG', x0 + (cw - w) / 2, y, w, h);
+        leg.forEach((l, j) => { doc.setFont('helvetica', j ? 'normal' : 'bold'); cor(j ? 70 : 29, j ? 65 : 27, j ? 58 : 24); doc.text(l, x0, y + h + 4.5 + j * 4.3); });
+        linhaH = Math.max(linhaH, bloco + 5);
+        if (++col >= cols) { col = 0; y += linhaH; linhaH = 0; }
+      }
+      if (col) y += linhaH;
+    }
+    if (c.pdf.leituras && a.leituras.length) { titulo('Leituras do laser', 12); [...a.leituras].sort((x, z) => x.ts - z.ts).forEach(l => kv(`${fdt(l.ts)}${l.nome ? ' · ' + l.nome : ''}`, fL(l.mm))); }
+  }
+  const tot = doc.getNumberOfPages();
+  for (let i = 1; i <= tot; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); cor(133, 124, 111); doc.text(T(`NYCXO Medida · ${p.nome}`), M, PH - 8); doc.text(`${i} / ${tot}`, PW - M, PH - 8, { align: 'right' }); }
+  const blob = doc.output('blob');
+  window.__ultimoPDF = { blob, paginas: tot };
+  baixar(`${p.nome}${soArea ? ' - ' + soArea.nome : ''}.pdf`, blob, 'application/pdf');
+}
+
+const ESC = { pts: [] }; // pontos do dimensionamento
 
 /* ===================== Início ===================== */
 (async () => {
   await DB.open();
   const e = await DB.get('kv', 'estado'); if (e) S = { leiturasSoltas: [], ...e };
   S.projetos.forEach(p => p.areas.forEach(migrarArea));
+  normalizarCfg();
   if (navigator.storage?.persist) navigator.storage.persist();
   render();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
