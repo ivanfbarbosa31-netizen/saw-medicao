@@ -67,6 +67,17 @@ dialog{border:0;border-radius:14px;padding:16px;max-width:520px;width:calc(100% 
 dialog::backdrop{background:rgba(0,0,0,.45)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(100px + env(safe-area-inset-bottom));background:#111827;color:#fff;padding:10px 14px;border-radius:10px;z-index:9;font-size:14px}
 pre.diag{font-size:11px;max-height:180px;overflow:auto;background:#111827;color:#a7f3d0;padding:8px;border-radius:8px}
+.board{position:relative;overflow:hidden;background:#e9ecef;border-radius:12px;height:calc(100dvh - 190px - env(safe-area-inset-top) - env(safe-area-inset-bottom));min-height:320px}
+.vsvg{display:block;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;font-family:-apple-system,Helvetica,Arial,sans-serif}
+.vsvg.esb{background:#fff}
+.zoomkit{display:flex;gap:6px}
+.fab{position:absolute;right:14px;bottom:14px;width:54px;height:54px;border-radius:50%;font-size:28px;padding:0;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.grade4{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.grade4 button{padding:14px 6px;line-height:1.5}
+.fbar{flex-wrap:wrap}
+.fbar[hidden]{display:none!important}
+label.mini{display:flex;flex-direction:column;margin:0;font-size:10px;flex:1;min-width:56px}
+label.mini input{width:100%;padding:5px 6px;text-align:right}
 </style>
 </head>
 <body>
@@ -120,7 +131,9 @@ const proj = () => S.projetos.find(p => p.id === rota.p);
 const area = () => proj()?.areas.find(a => a.id === rota.a);
 function ir(r) { rota = r; alvo = null; render(); window.scrollTo(0, 0); }
 document.getElementById('voltar').onclick = () => {
-  if (rota.v === 'foto') ir({ v: 'area', p: rota.p, a: rota.a, tab: 'fotos' });
+  if (rota.v === 'foto' && rota.de === 'esb') ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
+  else if (rota.v === 'esb' && rota.pick) ir({ v: 'foto', p: rota.p, a: rota.a, f: rota.pick });
+  else if (['foto', 'esb', 'leituras'].includes(rota.v)) ir({ v: 'area', p: rota.p, a: rota.a });
   else if (rota.v === 'area') ir({ v: 'proj', p: rota.p });
   else ir({ v: 'home' });
 };
@@ -131,7 +144,9 @@ async function render() {
   const t = document.getElementById('titulo');
   if (rota.v === 'home') { t.textContent = 'SAW Medição'; vHome(); }
   else if (rota.v === 'proj') { t.textContent = proj().nome; vProj(); }
-  else if (rota.v === 'area') { t.textContent = proj().nome + ' · ' + area().nome; vArea(); }
+  else if (rota.v === 'area') { t.textContent = proj().nome + ' · ' + area().nome; await vBase(); }
+  else if (rota.v === 'esb') { t.textContent = area().nome + ' · ' + (area().esbocos.find(x => x.id === rota.e)?.nome || 'esboço'); vEsboco(); }
+  else if (rota.v === 'leituras') { t.textContent = area().nome + ' · leituras'; vLeituras(); }
   else if (rota.v === 'foto') { t.textContent = area().nome + ' · foto'; await vFoto(); }
   renderChips();
 }
@@ -166,179 +181,600 @@ function vProj() {
   <div class="card"><div class="row"><b style="flex:1">Áreas / cômodos</b><button id="novaA" style="flex:0 0 auto" class="small">+ Área</button></div></div>
   <div id="areas">${p.areas.map(a => `
     <div class="list-item" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.nome)}</div>
-    <div class="s">${a.paredes.length} parede(s) · ${a.fotos.length} foto(s) · ${a.leituras.length} leitura(s) · ${fdt(a.data)}</div></div><span>›</span></div>`).join('') || '<div class="card muted">Crie uma área por cômodo (Cozinha, Banheiro…).</div>'}</div>
+    <div class="s">${a.esbocos.length} esboço(s) · ${a.fotos.length} foto(s) · ${a.leituras.length} leitura(s) · ${fdt(a.data)}</div></div><span>›</span></div>`).join('') || '<div class="card muted">Crie uma área por cômodo (Cozinha, Banheiro…).</div>'}</div>
   <details class="card"><summary><b>Dados do cliente</b></summary>
     ${CAMPOS.map(([k, l]) => `<label>${l}</label><input data-k="${k}" value="${esc(p.cliente[k])}">`).join('')}
   </details>
   <div class="row"><button class="btn2" id="expP">Exportar projeto (backup)</button><button class="btn2" id="renP">Renomear</button></div>
   <div class="row" style="margin-top:8px"><button class="btnbad" id="delP">Excluir projeto</button></div>`;
-  app.querySelectorAll('#areas .list-item').forEach(el => el.onclick = () => ir({ v: 'area', p: p.id, a: el.dataset.id, tab: 'planta' }));
+  app.querySelectorAll('#areas .list-item').forEach(el => el.onclick = () => ir({ v: 'area', p: p.id, a: el.dataset.id }));
   app.querySelectorAll('[data-k]').forEach(el => el.onchange = () => { p.cliente[el.dataset.k] = el.value; tocar(); });
   document.getElementById('novaA').onclick = async () => {
     const nome = await pedir('Nova área', 'Nome do cômodo (ex.: Cozinha)');
     if (!nome) return;
-    const a = { id: uid(), nome, data: Date.now(), altura: null, alturaO: null, paredes: [], aberturas: [], fotos: [], nota: '', leituras: [] };
-    p.areas.push(a); tocar(); ir({ v: 'area', p: p.id, a: a.id, tab: 'planta' });
+    const a = { id: uid(), nome, data: Date.now(), esbocos: [], fotos: [], notas: [], scans: [], leituras: [] };
+    p.areas.push(a); tocar(); ir({ v: 'area', p: p.id, a: a.id });
   };
   document.getElementById('renP').onclick = async () => { const n = await pedir('Renomear projeto', 'Nome', p.nome); if (n) { p.nome = n; tocar(); render(); } };
   document.getElementById('delP').onclick = async () => {
     if (!await confirmar(`Excluir “${p.nome}” e todas as medições e fotos? Não dá para desfazer.`)) return;
-    for (const a of p.areas) for (const f of a.fotos) await DB.del('fotos', f.id);
+    for (const a of p.areas) for (const f of [...a.fotos, ...(a.scans || [])]) await DB.del('fotos', f.id);
     S.projetos = S.projetos.filter(x => x !== p); await salvar(); ir({ v: 'home' });
   };
   document.getElementById('expP').onclick = () => exportarProjeto(p);
 }
 function tocar() { const p = proj(); if (p) p.alt = Date.now(); salvar(); }
 
-function vArea() {
-  const a = area(), tab = rota.tab || 'planta';
-  const T = [['planta', 'Planta'], ['leituras', `Leituras (${a.leituras.length})`], ['fotos', `Fotos (${a.fotos.length})`], ['nota', 'Nota']];
-  app.innerHTML = `<div class="tabs">${T.map(([k, l]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="tab"></div>`;
-  app.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { rota.tab = b.dataset.t; alvo = null; render(); });
-  ({ planta: tPlanta, leituras: tLeituras, fotos: tFotos, nota: tNota })[tab](document.getElementById('tab'), a);
+/* ===================== Vista com zoom/arraste (base e editor de planta) ===================== */
+// SVG com um <g class="cam">: tela = mundo * S + t. Pinça/roda dão zoom; 1 dedo vai para onDown (ou move a vista).
+class Vista {
+  constructor(svg, o) {
+    this.svg = svg; this.g = svg.querySelector('g.cam'); this.o = o; this.z = 1; this.s0 = 1; this.tx = 0; this.ty = 0;
+    this.ptrs = new Map(); this.gest = null; this.ult = 0; this.raf = 0;
+    svg.addEventListener('pointerdown', e => this.down(e)); svg.addEventListener('pointermove', e => this.move(e));
+    svg.addEventListener('pointerup', e => this.up(e)); svg.addEventListener('pointercancel', e => this.up(e, true));
+    svg.addEventListener('wheel', e => { e.preventDefault(); const p = this.local(e); this.zoomEm(this.z * Math.exp(-e.deltaY / 300), p); }, { passive: false });
+  }
+  get S() { return this.s0 * this.z; }
+  get k() { return 1 / this.S; }
+  local(e) { const r = this.svg.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  mundo([px, py]) { return [(px - this.tx) / this.S, (py - this.ty) / this.S]; }
+  enquadrar(b, margem = 0.08) {
+    const cw = this.svg.clientWidth || 300, ch = this.svg.clientHeight || 300;
+    this.s0 = Math.min(cw * (1 - 2 * margem) / (b.w || 1), ch * (1 - 2 * margem) / (b.h || 1)); this.z = 1;
+    this.tx = cw / 2 - (b.x + b.w / 2) * this.s0; this.ty = ch / 2 - (b.y + b.h / 2) * this.s0; this.aplicar(true);
+  }
+  aplicar(ja) {
+    this.g.setAttribute('transform', `translate(${this.tx} ${this.ty}) scale(${this.S})`);
+    if (ja) { this.o.mudou?.(); return; }
+    if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.o.mudou?.(); });
+  }
+  zoomEm(nz, [px, py]) { nz = Math.max(0.3, Math.min(12, nz)); const w = this.mundo([px, py]); this.z = nz; this.tx = px - w[0] * this.S; this.ty = py - w[1] * this.S; this.aplicar(); }
+  centro() { return [this.svg.clientWidth / 2, this.svg.clientHeight / 2]; }
+  down(e) {
+    try { this.svg.setPointerCapture(e.pointerId); } catch (_) { }
+    this.ptrs.set(e.pointerId, this.local(e));
+    if (this.ptrs.size === 2) {
+      this.gest?.h?.cancel?.(); const [a, b] = [...this.ptrs.values()], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      this.gest = { tipo: 'pinca', d0: Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, z0: this.z, wm: this.mundo(m) }; return;
+    }
+    if (this.ptrs.size > 2) return;
+    const p = this.local(e), h = this.o.onDown?.(this.mundo(p), e.target, p);
+    this.gest = h ? { tipo: 'h', h, p0: p, moveu: false } : { tipo: 'pan', p0: p, tx0: this.tx, ty0: this.ty, moveu: false };
+  }
+  move(e) {
+    if (!this.ptrs.has(e.pointerId)) { this.o.onHover?.(this.mundo(this.local(e))); return; }
+    this.ptrs.set(e.pointerId, this.local(e)); const g = this.gest; if (!g) return;
+    if (g.tipo === 'pinca') {
+      if (this.ptrs.size < 2) return; const [a, b] = [...this.ptrs.values()], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      this.z = Math.max(0.3, Math.min(12, g.z0 * Math.hypot(b[0] - a[0], b[1] - a[1]) / g.d0)); this.tx = m[0] - g.wm[0] * this.S; this.ty = m[1] - g.wm[1] * this.S; this.aplicar(); return;
+    }
+    const p = this.local(e); if (Math.hypot(p[0] - g.p0[0], p[1] - g.p0[1]) > 6) g.moveu = true;
+    if (g.tipo === 'h') g.h.move?.(this.mundo(p), g.moveu);
+    else if (g.moveu) { this.tx = g.tx0 + p[0] - g.p0[0]; this.ty = g.ty0 + p[1] - g.p0[1]; this.aplicar(); }
+  }
+  up(e, cancel) {
+    if (!this.ptrs.has(e.pointerId)) return; this.ptrs.delete(e.pointerId);
+    const g = this.gest; if (!g) return;
+    if (g.tipo === 'pinca') { if (!this.ptrs.size) this.gest = null; return; }
+    this.gest = null; const p = this.local(e);
+    if (g.tipo === 'h') { if (cancel) g.h.cancel?.(); else g.h.up?.(this.mundo(p), g.moveu); return; }
+    if (g.moveu || cancel) return;
+    const agora = Date.now();
+    if (agora - this.ult < 300) { this.ult = 0; this.zoomEm(this.z > 1.6 ? 1 : this.z * 2.2, p); }
+    else { this.ult = agora; this.o.onTap?.(this.mundo(p), e); }
+  }
+}
+const KIT_ZOOM = `<div class="zoomkit"><button class="small btn2" data-z="-" aria-label="Diminuir">−</button><button class="small btn2" data-z="+" aria-label="Aumentar">+</button><button class="small btn2" data-z="f" aria-label="Ajustar">⤢</button></div>`;
+function ligarZoom(root, v, ajustar) {
+  root.querySelectorAll('[data-z]').forEach(b => b.onclick = () => b.dataset.z === 'f' ? ajustar() : v.zoomEm(v.z * (b.dataset.z === '+' ? 1.5 : 1 / 1.5), v.centro()));
 }
 
-/* ---------- Geometria da planta ---------- */
-// Paredes em sequência: comprimento (mm) e giro (graus) no fim da parede; + = direita.
-function geometria(a) {
-  let x = 0, y = 0, h = 0; const pts = [[0, 0]];
-  for (const w of a.paredes) {
-    const L = +w.mm || 0; x += L * Math.cos(h * Math.PI / 180); y += L * Math.sin(h * Math.PI / 180);
-    pts.push([x, y]); h -= (+w.giro || 0);
+/* ===================== Modelo da área: base com esboços, fotos, notas e scans ===================== */
+// Esboço: pts desenhados (mm) definem as DIREÇÕES; a medida de cada parede (walls[i].mm) define o COMPRIMENTO.
+function novoEsboco(nome, pos) { return { id: uid(), nome, pts: [], walls: [], fechado: false, aberturas: [], altura: null, alturaO: null, pos: pos || { x: 0, y: 0, w: 1200 } }; }
+function migrarArea(a) {
+  a.esbocos ??= []; a.notas ??= []; a.scans ??= []; a.fotos ??= []; a.leituras ??= [];
+  if (a.paredes) {
+    if (a.paredes.length) {
+      // modelo v0.1/v0.2: sequência de comprimento + giro
+      let x = 0, y = 0, h = 0; const pts = [[0, 0]];
+      for (const w of a.paredes) { const L = +w.mm || 1000; x += L * Math.cos(h * Math.PI / 180); y -= L * Math.sin(h * Math.PI / 180); pts.push([x, y]); h -= (+w.giro || 0); }
+      const e = novoEsboco(a.nome); const fech = a.paredes.length > 2 && Math.hypot(x, y) < 30;
+      e.pts = fech ? pts.slice(0, -1) : pts; e.fechado = fech; e.walls = a.paredes.map(w => ({ mm: w.mm ?? null, o: w.o ?? null }));
+      e.aberturas = a.aberturas || []; e.altura = a.altura ?? null; e.alturaO = a.alturaO ?? null; a.esbocos.push(e);
+    }
+    delete a.paredes; delete a.aberturas; delete a.altura; delete a.alturaO;
   }
-  const per = a.paredes.reduce((s, w) => s + (+w.mm || 0), 0);
-  const fech = a.paredes.length > 2 ? Math.hypot(x, y) : null;
-  let area = null;
-  if (fech != null && fech < 30) { let s = 0; for (let i = 0; i < pts.length - 1; i++) s += pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1]; area = Math.abs(s / 2); }
-  return { pts, per, fech, area };
+  if (typeof a.nota === 'string') { if (a.nota.trim()) a.notas.push({ id: uid(), texto: a.nota, pos: null }); delete a.nota; }
+  posicionarItens(a);
+  return a;
 }
-function tPlanta(el, a) {
-  const g = geometria(a), H = +a.altura || 0;
-  const vaos = a.aberturas.reduce((s, o) => s + (+o.larg || 0) * (+o.alt || 0), 0);
-  el.innerHTML = `
-  <div class="card">${svgPlanta(a, g)}
-    <div class="kpi">
-      <div>Perímetro<b>${fmm(g.per)}</b></div>
-      <div>Pé-direito<b>${a.altura ? oTag(a.alturaO) + ' ' + fmm(a.altura) : '–'}</b></div>
-      <div>Área do piso<b>${g.area != null ? (g.area / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²' : '–'}</b></div>
-      <div>Fechamento<b style="color:${g.fech == null ? 'inherit' : g.fech < 30 ? 'var(--ok)' : 'var(--bad)'}">${g.fech == null ? '–' : fmm(g.fech)}</b></div>
-      <div>Parede bruta<b>${H && g.per ? (g.per * H / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²' : '–'}</b></div>
-      <div>Parede líquida<b>${H && g.per ? ((g.per * H - vaos) / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²' : '–'}</b></div>
-    </div>
-    <p class="muted">Fechamento = distância entre o fim da última parede e o início da primeira. Até 30 mm a planta é considerada fechada.</p>
-  </div>
-  <div class="card"><label>Pé-direito (mm)</label><input data-mm="altura" inputmode="decimal" value="${a.altura ?? ''}" placeholder="toque e meça com o laser"></div>
-  <div class="card"><b>Paredes</b> <span class="muted">(em ordem, no sentido horário)</span>
-    <table><tr><th>#</th><th class="num">Comprimento</th><th>Giro no fim</th><th></th></tr>
-    ${a.paredes.map((w, i) => `<tr><td>P${i + 1}</td>
-      <td><input data-mm="parede:${i}" inputmode="decimal" value="${w.mm ?? ''}" style="text-align:right"> <span class="muted">${oTag(w.o)}</span></td>
-      <td><select data-giro="${i}">${[90, -90, 45, -45, 0, 135, -135].map(v => `<option value="${v}" ${+w.giro === v ? 'selected' : ''}>${v > 0 ? '↱ ' + v + '° dir.' : v < 0 ? '↰ ' + (-v) + '° esq.' : 'reto'}</option>`).join('')}<option value="x" ${![90, -90, 45, -45, 0, 135, -135].includes(+w.giro) ? 'selected' : ''}>outro…</option></select></td>
-      <td><button class="small btnbad" data-delw="${i}">✕</button></td></tr>`).join('')}
-    </table>
-    <div class="row" style="margin-top:8px"><button id="addW" class="btn2">+ Parede</button><button id="addO" class="btn2">+ Porta/janela</button></div>
-  </div>
-  ${a.aberturas.length ? `<div class="card"><b>Portas e janelas</b><table><tr><th>Tipo</th><th>Parede</th><th class="num">Dist.</th><th class="num">Larg.</th><th class="num">Alt.</th><th class="num">Peit.</th><th></th></tr>
-    ${a.aberturas.map((o, i) => `<tr><td>${o.tipo === 'porta' ? '🚪' : '🪟'}</td><td>P${+o.parede + 1}</td><td class="num">${fmm(o.dist)}</td><td class="num">${fmm(o.larg)}</td><td class="num">${fmm(o.alt)}</td><td class="num">${fmm(o.peit)}</td>
-      <td><button class="small btn2" data-edo="${i}">✎</button></td></tr>`).join('')}</table></div>` : ''}
-  <div class="row"><button id="dxf3">DXF 3D (Promob)</button><button id="dxf2" class="btn2">DXF 2D</button></div>`;
-  ligarMedidas(el, a);
-  el.querySelectorAll('[data-giro]').forEach(s => s.onchange = async () => {
-    let v = s.value; if (v === 'x') { v = await pedir('Ângulo', 'Graus (+ direita, − esquerda)', a.paredes[s.dataset.giro].giro); if (v == null) return render(); }
-    a.paredes[s.dataset.giro].giro = parseFloat(String(v).replace(',', '.')) || 0; tocar(); render();
-  });
-  el.querySelectorAll('[data-delw]').forEach(b => b.onclick = async () => {
-    const i = +b.dataset.delw; if (!await confirmar(`Remover a parede P${i + 1}?`)) return;
-    a.paredes.splice(i, 1); a.aberturas = a.aberturas.filter(o => +o.parede !== i).map(o => ({ ...o, parede: +o.parede > i ? +o.parede - 1 : +o.parede })); tocar(); render();
-  });
-  document.getElementById('addW').onclick = () => { a.paredes.push({ mm: null, o: null, giro: 90 }); tocar(); render(); setTimeout(() => focarAlvo(el.querySelector(`[data-mm="parede:${a.paredes.length - 1}"]`)), 50); };
-  document.getElementById('addO').onclick = () => editarAbertura(a, null);
-  el.querySelectorAll('[data-edo]').forEach(b => b.onclick = () => editarAbertura(a, +b.dataset.edo));
-  document.getElementById('dxf3').onclick = () => baixar(`${proj().nome}_${a.nome}_3D.dxf`, dxf(a, true), 'application/dxf');
-  document.getElementById('dxf2').onclick = () => baixar(`${proj().nome}_${a.nome}_2D.dxf`, dxf(a, false), 'application/dxf');
+function itensDaArea(a) {
+  return [...a.esbocos.map(o => ({ t: 'esboco', o })), ...a.fotos.map(o => ({ t: 'foto', o })), ...a.notas.map(o => ({ t: 'nota', o })), ...a.scans.map(o => ({ t: 'scan', o }))];
 }
-function svgPlanta(a, g) {
-  if (a.paredes.length === 0) return '<p class="muted">Adicione as paredes em ordem. Toque no campo e dispare o laser: a medida entra sozinha.</p>';
-  const xs = g.pts.map(p => p[0]), ys = g.pts.map(p => p[1]);
-  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
-  const w = Math.max(maxx - minx, 500), h = Math.max(maxy - miny, 500), pad = Math.max(w, h) * 0.12;
-  const X = x => x - minx + pad, Y = y => maxy - y + pad, sw = Math.max(w, h) / 120;
-  let s = `<svg class="planta" viewBox="0 0 ${w + 2 * pad} ${h + 2 * pad}">`;
-  a.paredes.forEach((wl, i) => {
-    const [x1, y1] = g.pts[i], [x2, y2] = g.pts[i + 1], mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-    s += `<line x1="${X(x1)}" y1="${Y(y1)}" x2="${X(x2)}" y2="${Y(y2)}" stroke="#374151" stroke-width="${sw}" stroke-linecap="round"/>`;
-    s += `<text x="${X(mx)}" y="${Y(my)}" font-size="${sw * 4}" text-anchor="middle" dy="${-sw * 1.5}" fill="#1f5fa8">P${i + 1} ${wl.mm ? Math.round(wl.mm) : '?'}</text>`;
-  });
-  for (const o of a.aberturas) {
-    const i = +o.parede; if (!g.pts[i + 1]) continue;
-    const [x1, y1] = g.pts[i], [x2, y2] = g.pts[i + 1], L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L;
-    const a1 = +o.dist || 0, a2 = a1 + (+o.larg || 0);
-    s += `<line x1="${X(x1 + ux * a1)}" y1="${Y(y1 + uy * a1)}" x2="${X(x1 + ux * a2)}" y2="${Y(y1 + uy * a2)}" stroke="${o.tipo === 'porta' ? '#b45309' : '#0ea5e9'}" stroke-width="${sw * 2.2}"/>`;
+// Itens sem posição: esboços numa linha; fotos, notas e scans em volta deles, do mais perto para o mais longe.
+function posicionarItens(a) {
+  let xr = Math.max(-Infinity, ...a.esbocos.filter(e => e.pos).map(e => e.pos.x + e.pos.w));
+  for (const e of a.esbocos) if (!e.pos) { e.pos = { x: isFinite(xr) ? xr + 200 : 0, y: 0, w: 1200 }; xr = e.pos.x + 1200; }
+  const core = a.esbocos.length ? caixaUniao(a.esbocos.map(o => caixaItem({ t: 'esboco', o }))) : { x: 0, y: 0, w: 1200, h: 960 };
+  const ocup = itensDaArea(a).filter(it => it.o.pos).map(caixaItem), W = { foto: 420, nota: 420, scan: 340 }, cw = 460, ch = 600;
+  const cx = core.x + core.w / 2, cy = core.y + core.h / 2, cands = [];
+  for (let i = -8; i <= 8; i++) for (let j = -6; j <= 6; j++) { const x = cx + i * cw - cw / 2, y = cy + j * ch - ch / 2; cands.push({ x, y, d: Math.hypot((x + cw / 2 - cx) / (core.w + cw), (y + ch / 2 - cy) / (core.h + ch)) }); }
+  cands.sort((p, q) => p.d - q.d);
+  const cruza = (b, c, m) => b.x < c.x + c.w + m && b.x + b.w + m > c.x && b.y < c.y + c.h + m && b.y + b.h + m > c.y;
+  for (const it of itensDaArea(a)) if (!it.o.pos && it.t !== 'esboco') {
+    const w = W[it.t], c = cands.find(c => { const b = { x: c.x + 20, y: c.y + 20, w: cw - 40, h: ch - 40 }; return !cruza(b, core, 30) && !ocup.some(o => cruza(b, o, 0)); }) || { x: core.x + core.w + 100, y: core.y };
+    it.o.pos = { x: c.x + (cw - w) / 2, y: c.y + 20, w }; ocup.push(caixaItem(it));
   }
-  if (g.fech != null && g.fech >= 30) s += `<line x1="${X(g.pts.at(-1)[0])}" y1="${Y(g.pts.at(-1)[1])}" x2="${X(0)}" y2="${Y(0)}" stroke="#b91c1c" stroke-dasharray="${sw * 2}" stroke-width="${sw / 2}"/>`;
-  return s + `<circle cx="${X(0)}" cy="${Y(0)}" r="${sw * 1.6}" fill="#15803d"/></svg>`;
 }
-async function editarAbertura(a, i) {
-  const o = i == null ? { tipo: 'porta', parede: 0, dist: null, larg: 900, alt: 2110, peit: 0 } : { ...a.aberturas[i] };
-  const dlg = document.getElementById('dlg');
-  dlg.innerHTML = `<b>${i == null ? 'Nova' : 'Editar'} porta/janela</b>
-   <label>Tipo</label><select id="o_tipo"><option value="porta">Porta</option><option value="janela">Janela</option></select>
-   <label>Parede</label><select id="o_par">${a.paredes.map((w, k) => `<option value="${k}">P${k + 1} (${fmm(w.mm)})</option>`).join('')}</select>
-   <label>Distância do início da parede (mm)</label><input id="o_dist" data-dmm inputmode="decimal" value="${o.dist ?? ''}">
-   <label>Largura (mm)</label><input id="o_larg" data-dmm inputmode="decimal" value="${o.larg ?? ''}">
-   <label>Altura (mm)</label><input id="o_alt" data-dmm inputmode="decimal" value="${o.alt ?? ''}">
-   <label>Peitoril — altura do chão até a base (mm)</label><input id="o_peit" data-dmm inputmode="decimal" value="${o.peit ?? ''}">
-   <div class="row" style="margin-top:12px">${i != null ? '<button class="btnbad" id="o_del">Excluir</button>' : ''}<button class="btn2" id="o_can">Cancelar</button><button id="o_ok">Salvar</button></div>`;
-  dlg.querySelector('#o_tipo').value = o.tipo; dlg.querySelector('#o_par').value = o.parede;
-  dlg.querySelector('#o_tipo').onchange = e => { if (e.target.value === 'janela') { dlg.querySelector('#o_peit').value ||= 1000; } };
-  dlg.querySelectorAll('[data-dmm]').forEach(inp => inp.onfocus = () => focarAlvo(inp, v => { inp.value = Math.round(v); }));
-  dlg.showModal();
-  dlg.querySelector('#o_can').onclick = () => { alvo = null; dlg.close(); };
-  if (i != null) dlg.querySelector('#o_del').onclick = () => { a.aberturas.splice(i, 1); tocar(); alvo = null; dlg.close(); render(); };
-  dlg.querySelector('#o_ok').onclick = () => {
-    const n = id => { const v = parseFloat(dlg.querySelector(id).value.replace(',', '.')); return isNaN(v) ? null : v; };
-    const r = { tipo: dlg.querySelector('#o_tipo').value, parede: +dlg.querySelector('#o_par').value, dist: n('#o_dist'), larg: n('#o_larg'), alt: n('#o_alt'), peit: n('#o_peit') ?? 0 };
-    if (i == null) a.aberturas.push(r); else a.aberturas[i] = r;
-    tocar(); alvo = null; dlg.close(); render();
+function caixaItem(it) { const p = it.o.pos, h = it.t === 'esboco' ? p.w * 0.8 : it.t === 'foto' ? p.w * (it.o.ar || 1.333) : it.t === 'nota' ? p.w * 0.75 : p.w * 0.8; return { x: p.x, y: p.y, w: p.w, h }; }
+function caixaUniao(cs) {
+  if (!cs.length) return { x: -500, y: -400, w: 1000, h: 800 };
+  const x = Math.min(...cs.map(c => c.x)), y = Math.min(...cs.map(c => c.y)), X = Math.max(...cs.map(c => c.x + c.w)), Y = Math.max(...cs.map(c => c.y + c.h));
+  return { x, y, w: X - x, h: Y - y };
+}
+
+/* ---------- Geometria do esboço ---------- */
+function nParedes(e) { return e.fechado ? e.pts.length : Math.max(0, e.pts.length - 1); }
+function esbGeo(e) {
+  const n = nParedes(e), P = e.pts.length ? [e.pts[0].slice()] : [], len = [], est = [], dir = [];
+  for (let i = 0; i < n; i++) {
+    const a = e.pts[i], b = e.pts[(i + 1) % e.pts.length], dl = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const ux = (b[0] - a[0]) / dl, uy = (b[1] - a[1]) / dl, m = e.walls[i]?.mm;
+    const L = m != null ? +m : dl; len.push(L); est.push(m == null); dir.push([ux, uy]);
+    P.push([P[i][0] + ux * L, P[i][1] + uy * L]);
+  }
+  const per = len.reduce((s, v) => s + v, 0);
+  let fech = null, area = null;
+  if (e.fechado && n > 2) {
+    fech = Math.hypot(P[n][0] - P[0][0], P[n][1] - P[0][1]);
+    let s = 0; for (let i = 0; i < n; i++) s += P[i][0] * P[i + 1][1] - P[i + 1][0] * P[i][1]; area = Math.abs(s / 2);
+  }
+  let sa = 0; for (let i = 0; i < n; i++) sa += P[i][0] * P[i + 1][1] - P[i + 1][0] * P[i][1];
+  return { n, P, len, est, dir, per, fech, area, horario: sa > 0, todasMedidas: n > 0 && est.every(x => !x) };
+}
+function esbInfo(e) {
+  const g = esbGeo(e), H = +e.altura || 0, vaos = e.aberturas.reduce((s, o) => s + (+o.larg || 0) * (+o.alt || 0), 0);
+  return { g, H, bruta: H && g.per ? g.per * H : null, liquida: H && g.per ? g.per * H - vaos : null, volume: H && g.area != null ? g.area * H : null };
+}
+// posição (mundo) de um ponto t (0..1) da parede i, e a normal para fora
+function pontoParede(g, i, t) { const a = g.P[i], b = g.P[i + 1]; return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+function normalFora(g, i) { const [ux, uy] = g.dir[i]; return g.horario ? [uy, -ux] : [-uy, ux]; }
+const m2 = v => v == null ? '–' : (v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²';
+const m3 = v => v == null ? '–' : (v / 1e9).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m³';
+
+/* ---------- Desenho SVG do esboço (usado na base e no editor) ---------- */
+// k = unidades do mundo por pixel de tela. op: {sel, selV, selO, cotas, alcas, previa, fotos}
+function svgEsboco(e, k, op = {}) {
+  const g = esbGeo(e), out = [];
+  if (!g.n && !e.pts.length) return '';
+  const sw = 3.2 * k, fs = 11 * k;
+  // cotas fora das paredes, como no MeasureOn (✓ medida pelo laser, ✎ digitada, ≈ estimada pelo desenho)
+  if (op.cotas !== false) for (let i = 0; i < g.n; i++) {
+    const a = g.P[i], b = g.P[i + 1], [nx, ny] = normalFora(g, i), d = 22 * k;
+    const A = [a[0] + nx * d, a[1] + ny * d], B = [b[0] + nx * d, b[1] + ny * d], w = e.walls[i] || {};
+    const tag = g.est[i] ? '≈' : w.o === 'laser' ? '✓' : w.o === 'measureon' ? '⇩' : '✎';
+    const cor = g.est[i] ? '#9ca3af' : '#374151', sel = op.sel === i;
+    out.push(`<g class="cota" opacity="${sel ? 1 : 0.95}"><line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" stroke="${sel ? '#1f5fa8' : cor}" stroke-width="${k}"/>
+      <line x1="${a[0] + nx * 8 * k}" y1="${a[1] + ny * 8 * k}" x2="${a[0] + nx * 28 * k}" y2="${a[1] + ny * 28 * k}" stroke="${cor}" stroke-width="${0.8 * k}"/>
+      <line x1="${b[0] + nx * 8 * k}" y1="${b[1] + ny * 8 * k}" x2="${b[0] + nx * 28 * k}" y2="${b[1] + ny * 28 * k}" stroke="${cor}" stroke-width="${0.8 * k}"/>`);
+    let ang = Math.atan2(B[1] - A[1], B[0] - A[0]) * 180 / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+    const mx = (A[0] + B[0]) / 2 + nx * 9 * k, my = (A[1] + B[1]) / 2 + ny * 9 * k, txt = `${tag} ${Math.round(g.len[i]).toLocaleString('pt-BR')}`;
+    out.push(`<g transform="translate(${mx} ${my}) rotate(${ang})"><rect x="${-txt.length * fs * 0.32}" y="${-fs * 0.7}" width="${txt.length * fs * 0.64}" height="${fs * 1.4}" fill="${sel ? '#dbeafe' : '#fff'}" opacity=".9" rx="${2 * k}"/>
+      <text y="${fs * 0.36}" font-size="${fs}" text-anchor="middle" fill="${sel ? '#1f5fa8' : cor}" font-weight="${g.est[i] ? 400 : 700}">${txt}</text></g></g>`);
+  }
+  // paredes
+  for (let i = 0; i < g.n; i++) {
+    const a = g.P[i], b = g.P[i + 1];
+    out.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${op.sel === i ? '#1f5fa8' : '#4b5563'}" stroke-width="${op.sel === i ? sw * 1.5 : sw}" stroke-linecap="round"/>`);
+  }
+  if (g.fech != null && g.fech >= 30) out.push(`<line x1="${g.P[g.n][0]}" y1="${g.P[g.n][1]}" x2="${g.P[0][0]}" y2="${g.P[0][1]}" stroke="#b91c1c" stroke-dasharray="${4 * k} ${3 * k}" stroke-width="${1.5 * k}"/>`);
+  // portas e janelas
+  e.aberturas.forEach((o, j) => {
+    const i = +o.parede; if (i >= g.n) return;
+    const L = g.len[i] || 1, t1 = (+o.dist || 0) / L, t2 = ((+o.dist || 0) + (+o.larg || 0)) / L, A = pontoParede(g, i, t1), B = pontoParede(g, i, t2), sel = op.selO === j;
+    if (o.tipo === 'porta') {
+      const [nx, ny] = normalFora(g, i), r = (+o.larg || 0), C = [A[0] - nx * r, A[1] - ny * r];
+      out.push(`<line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" stroke="#fff" stroke-width="${sw * 1.6}"/>
+        <path d="M ${B[0]} ${B[1]} A ${r} ${r} 0 0 ${g.horario ? 1 : 0} ${C[0]} ${C[1]} L ${A[0]} ${A[1]}" fill="none" stroke="${sel ? '#1f5fa8' : '#6b7280'}" stroke-width="${(sel ? 2 : 1) * k}"/>`);
+    } else {
+      out.push(`<line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" stroke="#fff" stroke-width="${sw * 1.6}"/>
+        <line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" stroke="${sel ? '#1f5fa8' : '#0ea5e9'}" stroke-width="${sw * 1.2}" stroke-dasharray="${sw * 0.8} ${sw * 0.5}"/>`);
+    }
+    out.push(`<rect data-ab="${j}" x="${Math.min(A[0], B[0]) - 6 * k}" y="${Math.min(A[1], B[1]) - 6 * k}" width="${Math.abs(B[0] - A[0]) + 12 * k}" height="${Math.abs(B[1] - A[1]) + 12 * k}" fill="transparent"/>`);
+  });
+  // nome e área no centro
+  if (g.n > 2 && e.fechado) {
+    const cx = g.P.slice(0, g.n).reduce((s, p) => s + p[0], 0) / g.n, cy = g.P.slice(0, g.n).reduce((s, p) => s + p[1], 0) / g.n;
+    out.push(`<text x="${cx}" y="${cy}" font-size="${13 * k}" text-anchor="middle" font-weight="700" fill="#374151">${esc(e.nome)}</text>`);
+    if (g.area) out.push(`<text x="${cx}" y="${cy + 15 * k}" font-size="${10 * k}" text-anchor="middle" fill="#6b7280">${m2(g.area)}</text>`);
+  }
+  // fotos ligadas às paredes (bolinhas com a miniatura)
+  for (const f of op.fotos || []) {
+    if (!f.liga || f.liga.e !== e.id || f.liga.w >= g.n) continue;
+    const [px, py] = pontoParede(g, f.liga.w, f.liga.t), [nx, ny] = normalFora(g, f.liga.w), r = 13 * k, c = [px - nx * r * 1.6, py - ny * r * 1.6], idc = 'c' + f.id;
+    out.push(`<g data-pin="${f.id}"><clipPath id="${idc}"><circle cx="${c[0]}" cy="${c[1]}" r="${r}"/></clipPath>
+      <circle cx="${c[0]}" cy="${c[1]}" r="${r + 1.5 * k}" fill="#fff" stroke="#facc15" stroke-width="${1.5 * k}"/>
+      ${URLS[f.id] ? `<image href="${URLS[f.id]}" x="${c[0] - r}" y="${c[1] - r}" width="${2 * r}" height="${2 * r}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${idc})"/>` : ''}</g>`);
+  }
+  // alças dos pontos
+  if (op.alcas) e.pts.forEach((_, i) => { const p = g.P[i]; out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="${(op.selV === i ? 9 : 5.5) * k}" fill="${op.selV === i ? '#1f5fa8' : '#fff'}" stroke="#1f5fa8" stroke-width="${1.6 * k}"/>`); });
+  if (op.previa) out.push(op.previa);
+  return out.join('');
+}
+// miniaturas (object URL) das fotos, para as bolinhas e a base
+const URLS = {};
+async function carregarUrls(a) { for (const f of a.fotos) if (!URLS[f.id]) { const b = await DB.get('fotos', f.id); if (b) URLS[f.id] = URL.createObjectURL(b); } }
+
+/* ===================== BASE da área (tudo junto, como no MeasureOn) ===================== */
+async function vBase() {
+  const a = area(); migrarArea(a);
+  await carregarUrls(a);
+  for (const f of a.fotos) if (!f.ar && URLS[f.id]) { const im = new Image(); im.src = URLS[f.id]; await im.decode().catch(() => { }); if (im.naturalWidth) f.ar = im.naturalHeight / im.naturalWidth; }
+  app.innerHTML = `
+  <div class="ftool"><button class="small btn2" id="bLeit">Leituras (${a.leituras.length})</button><span style="flex:1"></span>${KIT_ZOOM}<button class="small btn2" id="bMais" aria-label="Mais">⋯</button></div>
+  <div class="board"><svg id="bsvg" class="vsvg"><g class="cam"></g></svg>
+   <div class="fdica" id="bdica" ${itensDaArea(a).length ? 'hidden' : ''}>Toque em ＋ para criar o esboço, tirar fotos ou anotar</div>
+   <button class="fab" id="bAdd" aria-label="Adicionar">＋</button></div>`;
+  const svg = document.getElementById('bsvg'), cam = svg.querySelector('g.cam');
+  let mov = null;
+  const desenha = () => {
+    const k = v.k;
+    cam.innerHTML = itensDaArea(a).map(it => {
+      const c = caixaItem(it), o = it.o, ativo = mov && mov.it.o === o;
+      const sombra = `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="${6 * k}" fill="#fff" stroke="${ativo ? '#1f5fa8' : '#d1d5db'}" stroke-width="${(ativo ? 2.5 : 1) * k}"/>`;
+      if (it.t === 'esboco') {
+        const g = esbGeo(o), xs = g.P.map(p => p[0]), ys = g.P.map(p => p[1]);
+        let inner = `<text x="${c.x + c.w / 2}" y="${c.y + c.h / 2}" font-size="${14 * k}" text-anchor="middle" fill="#9ca3af">Esboço vazio — toque para desenhar</text>`;
+        if (xs.length > 1) {
+          const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx || 1, bh = Math.max(...ys) - by || 1, s = Math.min(c.w * 0.74 / bw, c.h * 0.66 / bh);
+          const tx = c.x + c.w / 2 - (bx + bw / 2) * s, ty = c.y + c.h / 2 - (by + bh / 2) * s;
+          inner = `<g transform="translate(${tx} ${ty}) scale(${s})">${svgEsboco(o, c.w / 420 / s, { fotos: a.fotos })}</g>`; // miniatura em escala, como se tivesse 420 px
+        }
+        return `<g data-item="esboco:${o.id}">${sombra}${inner}<text x="${c.x + 8 * k}" y="${c.y + 16 * k}" font-size="${11 * k}" fill="#1f5fa8" font-weight="700">✏️ ${esc(o.nome)}</text></g>`;
+      }
+      if (it.t === 'foto') return `<g data-item="foto:${o.id}">${sombra}${URLS[o.id] ? `<image href="${URLS[o.id]}" x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" preserveAspectRatio="none"/>` : ''}
+        <svg x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" viewBox="0 0 1000 ${1000 * (o.ar || 1.333)}" preserveAspectRatio="none" overflow="visible">${o.setas.map((s, i) => setaSvg(setaGeo(s, i, 1000, 1000 * (o.ar || 1.333), 1000 / 230), false, i)).join('')}</svg>
+        ${o.liga ? `<circle cx="${c.x + c.w - 12 * k}" cy="${c.y + 12 * k}" r="${8 * k}" fill="#facc15" stroke="#000" stroke-width="${k}"/><text x="${c.x + c.w - 12 * k}" y="${c.y + 15.5 * k}" font-size="${9 * k}" text-anchor="middle">🔗</text>` : ''}</g>`;
+      if (it.t === 'nota') {
+        const linhas = (o.texto || 'Nota vazia').split('\n').flatMap(l => l.match(/.{1,26}(\s|$)|.{1,26}/g) || ['']).slice(0, 7);
+        return `<g data-item="nota:${o.id}"><rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="${6 * k}" fill="#fef9c3" stroke="${ativo ? '#1f5fa8' : '#eab308'}" stroke-width="${k}"/>
+          ${linhas.map((l, i) => `<text x="${c.x + 14}" y="${c.y + 40 + i * 40}" font-size="30" fill="#422006">${esc(l)}</text>`).join('')}</g>`;
+      }
+      return `<g data-item="scan:${o.id}">${sombra}<text x="${c.x + c.w / 2}" y="${c.y + c.h * 0.5}" font-size="${c.w * 0.3}" text-anchor="middle">🧊</text>
+        <text x="${c.x + c.w / 2}" y="${c.y + c.h * 0.85}" font-size="28" text-anchor="middle" fill="#374151">${esc(o.nome.slice(0, 18))}</text></g>`;
+    }).join('');
+  };
+  const v = new Vista(svg, {
+    mudou: desenha,
+    onDown: (w, t) => {
+      const el = t.closest?.('[data-item]'); if (!el) return null;
+      const [tipo, id] = el.dataset.item.split(':'), it = itensDaArea(a).find(x => x.t === tipo && x.o.id === id), p0 = { ...it.o.pos };
+      return {
+        move: (w2, moveu) => { if (!moveu) return; if (!mov) mov = { it, w0: w }; it.o.pos.x = p0.x + w2[0] - mov.w0[0]; it.o.pos.y = p0.y + w2[1] - mov.w0[1]; desenha(); },
+        up: (_, moveu) => { if (moveu) { mov = null; tocar(); desenha(); } else abrirItem(a, it); },
+        cancel: () => { if (mov) { it.o.pos.x = p0.x; it.o.pos.y = p0.y; mov = null; desenha(); } }
+      };
+    }
+  });
+  const ajustar = () => v.enquadrar(caixaUniao(itensDaArea(a).map(caixaItem)));
+  ligarZoom(app, v, ajustar); ajustar();
+  document.getElementById('bLeit').onclick = () => ir({ v: 'leituras', p: rota.p, a: rota.a });
+  document.getElementById('bAdd').onclick = () => menuAdicionar(a, v);
+  document.getElementById('bMais').onclick = () => menuArea(a);
+  rota.vista = v;
+}
+function abrirItem(a, it) {
+  if (it.t === 'esboco') ir({ v: 'esb', p: rota.p, a: rota.a, e: it.o.id });
+  else if (it.t === 'foto') ir({ v: 'foto', p: rota.p, a: rota.a, f: it.o.id });
+  else if (it.t === 'nota') editarNota(a, it.o);
+  else abrirScan(a, it.o);
+}
+function posNoCentro(a, w) {
+  const v = rota.vista; if (!v) return null;
+  const [cx, cy] = v.mundo(v.centro()); return { x: cx - w / 2 + (Math.random() - 0.5) * 120, y: cy - w / 2 + (Math.random() - 0.5) * 120, w };
+}
+function menuAdicionar(a) {
+  const d = document.getElementById('dlg');
+  d.innerHTML = `<b>Criar novo</b><div class="grade4">
+    <button class="btn2" data-n="esboco">✏️<br>Esboço</button><button class="btn2" data-n="cam">📷<br>Foto</button>
+    <button class="btn2" data-n="gal">🖼️<br>Da galeria</button><button class="btn2" data-n="nota">📝<br>Nota</button>
+    <button class="btn2" data-n="scan">🧊<br>Scan 3D</button></div><button id="nf" style="width:100%;margin-top:10px">Fechar</button>`;
+  d.showModal(); d.querySelector('#nf').onclick = () => d.close();
+  d.querySelectorAll('[data-n]').forEach(b => b.onclick = async () => {
+    d.close(); const n = b.dataset.n;
+    if (n === 'esboco') {
+      const nome = await pedir('Novo esboço', 'Nome do cômodo', a.esbocos.length ? `${a.nome} ${a.esbocos.length + 1}` : a.nome); if (!nome) return;
+      const e = novoEsboco(nome, posNoCentro(a, 1200)); a.esbocos.push(e); posicionarItens(a); tocar(); ir({ v: 'esb', p: rota.p, a: rota.a, e: e.id });
+    } else if (n === 'cam' || n === 'gal') {
+      const add = async file => {
+        const blob = await reduzir(file), id = uid(), bmp = await createImageBitmap(blob);
+        await DB.put('fotos', id, blob); URLS[id] = URL.createObjectURL(blob);
+        a.fotos.push({ id, setas: [], ts: Date.now(), ar: bmp.height / bmp.width, pos: null }); posicionarItens(a); tocar(); ir({ v: 'foto', p: rota.p, a: rota.a, f: id });
+      };
+      if (n === 'cam') { const i = document.getElementById('fcam'); i.onchange = () => i.files[0] && add(i.files[0]); i.value = ''; i.click(); }
+      else escolherArquivo('image/*', add);
+    } else if (n === 'nota') {
+      const o = { id: uid(), texto: '', pos: null }; a.notas.push(o); posicionarItens(a); tocar(); render(); editarNota(a, o);
+    } else if (n === 'scan') {
+      aviso('Scan 3D com LiDAR', `O navegador não tem acesso ao sensor LiDAR do iPhone — só apps instalados têm. Faça o scan num app de LiDAR (por exemplo o <b>3d Scanner App</b> ou o <b>Polycam</b>), exporte em <b>USDZ</b> e anexe aqui. No iPhone ele abre em 3D/realidade aumentada.<br><br><button id="scanEsc">Escolher arquivo do scan</button>`);
+      document.getElementById('scanEsc').onclick = () => { document.getElementById('dlg').close(); escolherArquivo('.usdz,.usd,.glb,.gltf,.obj,.ply,model/vnd.usdz+zip', async file => {
+        const id = uid(); await DB.put('fotos', id, file); a.scans.push({ id, nome: file.name, tipo: file.type || file.name.split('.').pop(), tam: file.size, pos: null }); posicionarItens(a); tocar(); render();
+      }); };
+    }
+  });
+}
+function editarNota(a, o) {
+  const d = document.getElementById('dlg');
+  d.innerHTML = `<b>Nota</b><textarea id="nt" rows="9" placeholder="Tomadas, pontos de água e gás, interferências…">${esc(o.texto)}</textarea>
+   <div class="row" style="margin-top:10px"><button class="btnbad" id="nx">Excluir</button><button id="nk">Pronto</button></div>`;
+  d.showModal(); const t = d.querySelector('#nt'); t.focus();
+  d.querySelector('#nk').onclick = () => { o.texto = t.value; tocar(); d.close(); render(); };
+  d.querySelector('#nx').onclick = async () => { d.close(); if (!await confirmar('Excluir esta nota?')) return; a.notas = a.notas.filter(x => x !== o); tocar(); render(); };
+}
+async function abrirScan(a, o) {
+  const b = await DB.get('fotos', o.id), url = b ? URL.createObjectURL(new Blob([b], { type: /usdz/i.test(o.nome) ? 'model/vnd.usdz+zip' : b.type })) : '';
+  const d = document.getElementById('dlg');
+  d.innerHTML = `<b>🧊 ${esc(o.nome)}</b><p class="muted">${(o.tam / 1048576).toFixed(1)} MB</p>
+   <div style="display:grid;gap:8px">${/\.usdz$/i.test(o.nome) ? `<a rel="ar" href="${url}" class="btn" style="text-align:center;text-decoration:none"><img alt="" style="display:none">Abrir em 3D (iPhone)</a>` : ''}
+   <button class="btn2" id="sb">Baixar arquivo</button><button class="btnbad" id="sx">Excluir</button><button id="sf">Fechar</button></div>`;
+  d.showModal(); d.querySelector('#sf').onclick = () => d.close();
+  d.querySelector('#sb').onclick = () => baixar(o.nome, b);
+  d.querySelector('#sx').onclick = async () => { d.close(); if (!await confirmar('Excluir este scan?')) return; await DB.del('fotos', o.id); a.scans = a.scans.filter(x => x !== o); tocar(); render(); };
+}
+function menuArea(a) {
+  const d = document.getElementById('dlg');
+  d.innerHTML = `<b>${esc(a.nome)}</b><div style="display:grid;gap:8px;margin-top:10px"><button class="btn2" id="ar">Renomear área</button><button class="btn2" id="ao">Organizar itens</button><button class="btnbad" id="ax">Excluir área</button><button id="af">Fechar</button></div>`;
+  d.showModal(); d.querySelector('#af').onclick = () => d.close();
+  d.querySelector('#ar').onclick = async () => { d.close(); const n = await pedir('Renomear área', 'Nome', a.nome); if (n) { a.nome = n; tocar(); render(); } };
+  d.querySelector('#ao').onclick = () => { d.close(); itensDaArea(a).forEach(it => it.o.pos = null); a.esbocos.forEach((e, i) => e.pos = { x: i * 1300, y: 0, w: 1200 }); posicionarItens(a); tocar(); render(); };
+  d.querySelector('#ax').onclick = async () => {
+    d.close(); if (!await confirmar(`Excluir a área “${a.nome}” com esboços, fotos e notas?`)) return;
+    for (const f of [...a.fotos, ...a.scans]) await DB.del('fotos', f.id);
+    const p = proj(); p.areas = p.areas.filter(x => x !== a); tocar(); ir({ v: 'proj', p: p.id });
   };
 }
 
-/* ---------- Leituras ---------- */
-function tLeituras(el, a) {
-  const ls = [...a.leituras].sort((x, y) => y.ts - x.ts);
-  el.innerHTML = `<div class="card"><p class="muted" style="margin-top:0">Toda medida do laser feita com esta área aberta entra aqui. ✓ = laser · ✎ = digitada · ⇩ = importada do MeasureOn.</p>
+/* ===================== Editor do esboço: desenhar na tela e depois medir ===================== */
+const GRADES = [50, 100, 250, 500, 1000, 2000, 5000];
+function vEsboco() {
+  const a = area(), e = a.esbocos.find(x => x.id === rota.e);
+  const pick = rota.pick ? a.fotos.find(f => f.id === rota.pick) : null;
+  app.innerHTML = `
+  <div class="ftool">${pick ? '<b style="font-size:14px">Toque na parede da foto</b>' : `<button class="small" id="eDes">✏️ Desenhar</button><button class="small btn2" id="eAlt">Pé-direito</button>`}
+   <span style="flex:1"></span>${KIT_ZOOM}${pick ? '' : '<button class="small btn2" id="eInfo" aria-label="Informações">ⓘ</button>'}</div>
+  <div class="board"><svg id="esvg" class="vsvg esb"><g class="cam"><g id="egrid"></g><g id="edes"></g></g></svg><div class="fdica" id="edica" hidden></div></div>
+  <div id="ebar" class="fbar" hidden></div>`;
+  const svg = document.getElementById('esvg'), gg = document.getElementById('egrid'), gd = document.getElementById('edes');
+  let modo = !e.pts.length && !pick ? 'desenhar' : 'editar', sel = null, previa = null, hover = null;
+  const dica = t => { const d = document.getElementById('edica'); d.hidden = !t; d.textContent = t || ''; };
+  const grade = () => {
+    const k = v.k, [x0, y0] = v.mundo([0, 0]), [x1, y1] = v.mundo([svg.clientWidth, svg.clientHeight]);
+    const st = GRADES.find(s => s / k >= 22) || 5000, out = [];
+    for (let x = Math.floor(x0 / st) * st; x <= x1; x += st) out.push(`<line x1="${x}" y1="${y0}" x2="${x}" y2="${y1}" stroke="${x % (st * 5) === 0 ? '#cbd5e1' : '#e5e7eb'}" stroke-width="${k}"/>`);
+    for (let y = Math.floor(y0 / st) * st; y <= y1; y += st) out.push(`<line x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="${y % (st * 5) === 0 ? '#cbd5e1' : '#e5e7eb'}" stroke-width="${k}"/>`);
+    gg.innerHTML = out.join('');
+    return st;
+  };
+  const desenha = () => {
+    grade();
+    const k = v.k; let pv = '';
+    if (modo === 'desenhar' && previa && e.pts.length && !e.fechado) {
+      const g = esbGeo(e), u = g.P[g.n], L = Math.hypot(previa[0] - u[0], previa[1] - u[1]);
+      pv = `<line x1="${u[0]}" y1="${u[1]}" x2="${previa[0]}" y2="${previa[1]}" stroke="#1f5fa8" stroke-width="${2.5 * k}" stroke-dasharray="${6 * k} ${4 * k}"/>
+        <circle cx="${previa[0]}" cy="${previa[1]}" r="${5 * k}" fill="#1f5fa8"/>
+        <text x="${(u[0] + previa[0]) / 2}" y="${(u[1] + previa[1]) / 2 - 8 * k}" font-size="${12 * k}" text-anchor="middle" fill="#1f5fa8" font-weight="700">≈ ${Math.round(L).toLocaleString('pt-BR')}</text>`;
+    }
+    if (modo === 'desenhar' && e.pts.length >= 3 && !e.fechado) { const p = esbGeo(e).P[0]; pv += `<circle cx="${p[0]}" cy="${p[1]}" r="${14 * k}" fill="none" stroke="#15803d" stroke-width="${2 * k}" stroke-dasharray="${3 * k} ${2 * k}"/>`; }
+    if (modo === 'desenhar' && e.pts.length === 0 && previa) pv = `<circle cx="${previa[0]}" cy="${previa[1]}" r="${5 * k}" fill="#1f5fa8"/>`;
+    gd.innerHTML = svgEsboco(e, k, { sel: sel?.t === 'w' ? sel.i : null, selV: sel?.t === 'v' ? sel.i : null, selO: sel?.t === 'o' ? sel.i : null, alcas: modo === 'editar' && !pick, previa: pv, fotos: a.fotos });
+  };
+  // encaixe: grade fina, ângulos de 45° e fechamento no ponto inicial
+  const encaixar = w => {
+    const k = v.k, g = esbGeo(e);
+    if (e.pts.length >= 3 && Math.hypot(w[0] - g.P[0][0], w[1] - g.P[0][1]) < 22 * k) return { p: g.P[0], fecha: true };
+    if (!e.pts.length) return { p: [Math.round(w[0] / 50) * 50, Math.round(w[1] / 50) * 50] };
+    const u = g.P[g.n], dx = w[0] - u[0], dy = w[1] - u[1], L = Math.round(Math.hypot(dx, dy) / 10) * 10;
+    let ang = Math.atan2(dy, dx); const q = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4); if (Math.abs(ang - q) < 0.14) ang = q;
+    return { p: [u[0] + Math.cos(ang) * L, u[1] + Math.sin(ang) * L] };
+  };
+  const consolidar = () => { const g = esbGeo(e); e.pts = g.P.slice(0, e.pts.length).map(p => p.slice()); };
+  const addPonto = w => {
+    const r = encaixar(w);
+    if (r.fecha) { e.walls.push({ mm: null, o: null }); e.fechado = true; setModo('editar'); tocar(); selecionar({ t: 'w', i: 0 }); return; }
+    if (e.pts.length) { consolidar(); e.walls.push({ mm: null, o: null }); }
+    e.pts.push(r.p); tocar(); desenha();
+  };
+  const perto = (w, soParedes) => {
+    const g = esbGeo(e), tol = 18 * v.k;
+    if (!soParedes) {
+    if (modo === 'editar') for (let i = 0; i < e.pts.length; i++) if (Math.hypot(w[0] - g.P[i][0], w[1] - g.P[i][1]) < tol) return { t: 'v', i };
+    for (let j = 0; j < e.aberturas.length; j++) {
+      const o = e.aberturas[j], i = +o.parede; if (i >= g.n) continue; const L = g.len[i] || 1;
+      const A = pontoParede(g, i, (+o.dist || 0) / L), B = pontoParede(g, i, ((+o.dist || 0) + (+o.larg || 0)) / L);
+      if (distSeg(w, A, B) < tol * 0.8) return { t: 'o', i: j };
+    }
+    }
+    let melhor = null;
+    for (let i = 0; i < g.n; i++) { const d = distSeg(w, g.P[i], g.P[i + 1]); if (d < tol && (!melhor || d < melhor.d)) melhor = { t: 'w', i, d }; }
+    return melhor;
+  };
+  const v = new Vista(svg, {
+    mudou: desenha,
+    onHover: w => { if (modo === 'desenhar') { previa = encaixar(w).p; desenha(); } },
+    onDown: (w, tgt) => {
+      const pin = tgt.closest?.('[data-pin]');
+      if (pin && !pick) return { up: (_, m) => { if (!m) ir({ v: 'foto', p: rota.p, a: rota.a, f: pin.dataset.pin, de: 'esb', e: e.id }); } };
+      if (pick) { const h = perto(w, true); if (h?.t !== 'w') return null; return { up: (w2) => { const g = esbGeo(e), [A, B] = [g.P[h.i], g.P[h.i + 1]]; pick.liga = { e: e.id, w: h.i, t: Math.max(0.05, Math.min(0.95, projT(w2, A, B))) }; tocar(); toast(`Foto ligada à parede ${h.i + 1}.`); ir({ v: 'foto', p: rota.p, a: rota.a, f: pick.id }); } }; }
+      if (modo === 'desenhar') {
+        if (e.fechado) return null;
+        return { move: w2 => { previa = encaixar(w2).p; desenha(); }, up: w2 => { previa = null; addPonto(w2); }, cancel: () => { previa = null; desenha(); } };
+      }
+      const h = perto(w); if (!h) return null;
+      if (h.t === 'v') {
+        return {
+          move: (w2, moveu) => { if (!moveu) return; consolidar(); e.pts[h.i] = [Math.round(w2[0] / 10) * 10, Math.round(w2[1] / 10) * 10]; sel = h; desenha(); },
+          up: (_, moveu) => { if (moveu) tocar(); selecionar(h); }
+        };
+      }
+      return { up: (_, moveu) => { if (!moveu) selecionar(h); } };
+    },
+    onTap: () => { if (modo === 'editar' && sel) selecionar(null); }
+  });
+  const selecionar = s => {
+    sel = s; desenha(); const bar = document.getElementById('ebar'); alvo = null;
+    if (!s) { bar.hidden = true; return; }
+    bar.hidden = false;
+    if (s.t === 'w') {
+      const w = e.walls[s.i], g = esbGeo(e);
+      bar.innerHTML = `<b>P${s.i + 1}</b><input id="emm" inputmode="decimal" class="alvo" value="${w.mm != null ? Math.round(w.mm) : ''}" placeholder="≈ ${Math.round(g.len[s.i])}"><span class="muted">mm</span><span id="eori">${w.mm != null ? oTag(w.o) : ''}</span>
+        <button class="small btn2" data-ab="porta" aria-label="Porta">🚪</button><button class="small btn2" data-ab="janela" aria-label="Janela">🪟</button><button class="small btn2" id="eDiv" aria-label="Dividir">✂</button><button class="small btn2" id="eOk">✓</button>`;
+      const inp = document.getElementById('emm');
+      const grava = (val, o) => { w.mm = val; w.o = val == null ? null : o; tocar(); desenha(); document.getElementById('eori').innerHTML = val != null ? oTag(w.o) : ''; };
+      alvo = { inp, aplicar: val => { inp.value = Math.round(val); grava(val, 'laser'); const nx = e.walls.findIndex((x, j) => j > s.i && x.mm == null); setTimeout(() => selecionar(nx >= 0 ? { t: 'w', i: nx } : s), 350); } };
+      inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(isNaN(val) ? null : val, 'manual'); };
+      inp.onkeydown = ev => { if (ev.key === 'Enter') inp.blur(); };
+      bar.querySelectorAll('[data-ab]').forEach(b => b.onclick = () => {
+        const L = esbGeo(e).len[s.i], larg = b.dataset.ab === 'porta' ? 900 : 1000;
+        e.aberturas.push({ tipo: b.dataset.ab, parede: s.i, dist: Math.max(0, Math.round((L - larg) / 2)), larg, alt: b.dataset.ab === 'porta' ? 2110 : 1000, peit: b.dataset.ab === 'porta' ? 0 : 1000 });
+        tocar(); selecionar({ t: 'o', i: e.aberturas.length - 1 });
+      });
+      document.getElementById('eDiv').onclick = () => { dividirParede(e, s.i, a); tocar(); selecionar({ t: 'w', i: s.i }); };
+      document.getElementById('eOk').onclick = () => selecionar(null);
+    } else if (s.t === 'v') {
+      bar.innerHTML = `<b>Ponto ${s.i + 1}</b><span class="muted" style="flex:1">arraste para mover</span><button class="small btnbad" id="eVx">🗑 Remover ponto</button><button class="small btn2" id="eOk">✓</button>`;
+      document.getElementById('eVx').onclick = () => { removerPonto(e, s.i, a); tocar(); selecionar(null); };
+      document.getElementById('eOk').onclick = () => selecionar(null);
+    } else if (s.t === 'o') {
+      const o = e.aberturas[s.i], C = [['dist', 'Dist.'], ['larg', 'Larg.'], ['alt', 'Alt.'], ['peit', 'Peit.']];
+      bar.innerHTML = `<b>${o.tipo === 'porta' ? '🚪' : '🪟'}</b>${C.map(([c, l]) => `<label class="mini">${l}<input data-c="${c}" inputmode="decimal" value="${o[c] ?? ''}"></label>`).join('')}<button class="small btnbad" id="eOx" aria-label="Excluir">🗑</button><button class="small btn2" id="eOk">✓</button>`;
+      bar.querySelectorAll('[data-c]').forEach(inp => {
+        const grava = val => { o[inp.dataset.c] = val; tocar(); desenha(); };
+        inp.onfocus = () => { bar.querySelectorAll('.alvo').forEach(x => x.classList.remove('alvo')); inp.classList.add('alvo'); alvo = { inp, aplicar: val => { inp.value = Math.round(val); grava(Math.round(val)); } }; };
+        inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(isNaN(val) ? null : val); };
+      });
+      const lg = bar.querySelector('[data-c="larg"]'); lg.classList.add('alvo'); alvo = { inp: lg, aplicar: val => { lg.value = Math.round(val); o.larg = Math.round(val); tocar(); desenha(); } };
+      document.getElementById('eOx').onclick = () => { e.aberturas.splice(s.i, 1); tocar(); selecionar(null); };
+      document.getElementById('eOk').onclick = () => selecionar(null);
+    }
+  };
+  const setModo = m => {
+    modo = m; previa = null; const b = document.getElementById('eDes');
+    if (b) { b.classList.toggle('btn2', m !== 'desenhar'); b.textContent = m === 'desenhar' ? (e.fechado || e.pts.length < 2 ? '✓ Concluir' : '✓ Concluir') : '✏️ Desenhar'; }
+    const bar = document.getElementById('ebar');
+    if (m === 'desenhar') {
+      selecionar(null); bar.hidden = false;
+      bar.innerHTML = `<span class="muted" style="flex:1">${e.pts.length ? 'Toque o próximo canto. Feche tocando no ponto verde.' : 'Toque o primeiro canto do cômodo.'}</span><button class="small btn2" id="eUndo">↶ Desfazer</button>`;
+      document.getElementById('eUndo').onclick = () => { if (e.fechado) { e.fechado = false; e.walls.pop(); } else if (e.pts.length) { e.pts.pop(); if (e.walls.length > Math.max(0, e.pts.length - 1)) e.walls.pop(); } tocar(); setModo('desenhar'); desenha(); };
+      dica('');
+    } else { bar.hidden = true; dica(e.pts.length && esbGeo(e).est.some(x => x) ? 'Toque numa parede e meça com o laser' : ''); }
+    desenha();
+  };
+  const ajustar = () => {
+    const g = esbGeo(e);
+    if (g.P.length < 2) { v.enquadrar({ x: -3000, y: -2500, w: 6000, h: 5000 }); return; }
+    const xs = g.P.map(p => p[0]), ys = g.P.map(p => p[1]), b = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    const m = Math.max(b.w, b.h) * 0.12 + 300; v.enquadrar({ x: b.x - m, y: b.y - m, w: b.w + 2 * m, h: b.h + 2 * m }, 0.02);
+  };
+  ligarZoom(app, v, ajustar); ajustar();
+  if (!pick) {
+    document.getElementById('eDes').onclick = () => setModo(modo === 'desenhar' ? 'editar' : 'desenhar');
+    document.getElementById('eAlt').onclick = () => {
+      selecionar(null); const bar = document.getElementById('ebar'); bar.hidden = false;
+      bar.innerHTML = `<b>Pé-direito</b><input id="eH" inputmode="decimal" class="alvo" value="${e.altura != null ? Math.round(e.altura) : ''}" placeholder="meça com o laser"><span class="muted">mm</span><span id="eHo">${e.altura != null ? oTag(e.alturaO) : ''}</span><button class="small btn2" id="eOk">✓</button>`;
+      const inp = document.getElementById('eH');
+      const grava = (val, o) => { e.altura = val; e.alturaO = val == null ? null : o; tocar(); document.getElementById('eHo').innerHTML = val != null ? oTag(o) : ''; };
+      alvo = { inp, aplicar: val => { inp.value = Math.round(val); grava(val, 'laser'); } };
+      inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(isNaN(val) ? null : val, 'manual'); };
+      document.getElementById('eOk').onclick = () => selecionar(null);
+    };
+    document.getElementById('eInfo').onclick = () => infoEsboco(a, e);
+  }
+  setModo(modo);
+  if (pick) dica('Toque na parede onde a foto foi tirada');
+  carregarUrls(a).then(desenha);
+}
+function distSeg(p, a, b) { const t = projT(p, a, b), q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; return Math.hypot(p[0] - q[0], p[1] - q[1]); }
+function projT(p, a, b) { const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1; return Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)); }
+// Edições estruturais mantêm portas/janelas e fotos ligadas na parede certa.
+function remapear(a, e, fn) {
+  for (const o of e.aberturas) { const r = fn(+o.parede, null, o); if (r == null) o._x = true; else { o.parede = r.w; if (r.dist != null) o.dist = r.dist; } }
+  e.aberturas = e.aberturas.filter(o => !o._x);
+  for (const f of a.fotos) if (f.liga?.e === e.id) { const r = fn(f.liga.w, f.liga.t); if (r == null) delete f.liga; else { f.liga.w = r.w; if (r.t != null) f.liga.t = r.t; } }
+}
+function dividirParede(e, i, a) {
+  const g = esbGeo(e), L = g.len[i], M = pontoParede(g, i, 0.5);
+  e.pts = g.P.slice(0, e.pts.length).map(p => p.slice()); e.pts.splice(i + 1, 0, M);
+  e.walls.splice(i, 1, { mm: e.walls[i].mm != null ? e.walls[i].mm / 2 : null, o: e.walls[i].mm != null ? 'manual' : null }, { mm: e.walls[i].mm != null ? e.walls[i].mm / 2 : null, o: e.walls[i].mm != null ? 'manual' : null });
+  remapear(a, e, (w, t, o) => {
+    if (w < i) return { w }; if (w > i) return { w: w + 1 };
+    if (o) return (+o.dist || 0) < L / 2 ? { w: i } : { w: i + 1, dist: (+o.dist || 0) - L / 2 };
+    return t < 0.5 ? { w: i, t: t * 2 } : { w: i + 1, t: (t - 0.5) * 2 };
+  });
+}
+function removerPonto(e, k, a) {
+  const n = nParedes(e), g = esbGeo(e);
+  e.pts = g.P.slice(0, e.pts.length).map(p => p.slice());
+  if (!e.fechado && (k === 0 || k === e.pts.length - 1)) {
+    const w0 = k === 0 ? 0 : n - 1; e.pts.splice(k, 1); if (n) e.walls.splice(w0, 1);
+    remapear(a, e, (w) => w === w0 ? null : { w: w > w0 ? w - 1 : w }); return;
+  }
+  if (e.fechado && e.pts.length <= 3) { e.fechado = false; e.pts.splice(k, 1); e.walls = e.walls.slice(0, Math.max(0, e.pts.length - 1)).map(() => ({ mm: null, o: null })); remapear(a, e, w => w < e.walls.length ? { w } : null); return; }
+  if (e.fechado && k === 0) { // gira para o ponto removido não ser o primeiro
+    e.pts.push(e.pts.shift()); e.walls.push(e.walls.shift()); remapear(a, e, w => ({ w: (w - 1 + n) % n })); k = e.pts.length - 1;
+  }
+  const g2 = esbGeo(e), l0 = g2.len[k - 1], l1 = g2.len[k];
+  e.pts.splice(k, 1); e.walls.splice(k - 1, 2, { mm: null, o: null });
+  remapear(a, e, (w, t, o) => {
+    if (w < k - 1) return { w }; if (w > k) return { w: w - 1 };
+    if (o) return w === k - 1 ? { w: k - 1 } : { w: k - 1, dist: (+o.dist || 0) + l0 };
+    return { w: k - 1, t: w === k - 1 ? t * l0 / (l0 + l1) : (l0 + t * l1) / (l0 + l1) };
+  });
+}
+function infoEsboco(a, e) {
+  const I = esbInfo(e), g = I.g, d = document.getElementById('dlg');
+  const nO = e.aberturas.length, tagH = e.altura != null ? oTag(e.alturaO) + ' ' : '';
+  d.innerHTML = `<b>Informações — ${esc(e.nome)}</b>
+   <table style="margin-top:8px">
+    <tr><td>Área do pavimento</td><td class="num">${g.todasMedidas ? '' : '≈ '}${m2(g.area)}</td></tr>
+    <tr><td>Perímetro</td><td class="num">${g.todasMedidas ? '✓ ' : '≈ '}${fmm(g.per)}</td></tr>
+    <tr><td>Altura (pé-direito)</td><td class="num">${tagH}${fmm(e.altura)}</td></tr>
+    <tr><td>Área bruta da parede</td><td class="num">${m2(I.bruta)}</td></tr>
+    <tr><td>Área líquida da parede</td><td class="num">${m2(I.liquida)}</td></tr>
+    <tr><td>Volume do cômodo</td><td class="num">${m3(I.volume)}</td></tr>
+    <tr><td>Fechamento da planta</td><td class="num" style="color:${g.fech == null ? 'inherit' : g.fech < 30 ? 'var(--ok)' : 'var(--bad)'}">${g.fech == null ? '–' : fmm(g.fech)}</td></tr>
+    <tr><td>Paredes medidas</td><td class="num">${g.est.filter(x => !x).length} de ${g.n}</td></tr>
+    <tr><td>Portas / janelas</td><td class="num">${e.aberturas.filter(o => o.tipo === 'porta').length} / ${e.aberturas.filter(o => o.tipo !== 'porta').length}</td></tr>
+   </table>
+   <p class="muted">✓ medida pelo laser · ✎ digitada · ≈ estimada pelo desenho. Fechamento acima de 30 mm indica parede ou ângulo a conferir.</p>
+   <div style="display:grid;gap:8px"><div class="row"><button id="x3">DXF 3D (Promob)</button><button class="btn2" id="x2">DXF 2D</button></div>
+   <div class="row"><button class="btn2" id="er">Renomear</button><button class="btnbad" id="ex">Excluir esboço</button></div><button class="btn2" id="ef">Fechar</button></div>`;
+  d.showModal(); d.querySelector('#ef').onclick = () => d.close();
+  d.querySelector('#x3').onclick = () => baixar(`${proj().nome}_${e.nome}_3D.dxf`, dxf(e, true), 'application/dxf');
+  d.querySelector('#x2').onclick = () => baixar(`${proj().nome}_${e.nome}_2D.dxf`, dxf(e, false), 'application/dxf');
+  d.querySelector('#er').onclick = async () => { d.close(); const n = await pedir('Renomear esboço', 'Nome', e.nome); if (n) { e.nome = n; tocar(); render(); } };
+  d.querySelector('#ex').onclick = async () => {
+    d.close(); if (!await confirmar(`Excluir o esboço “${e.nome}”?`)) return;
+    a.esbocos = a.esbocos.filter(x => x !== e); a.fotos.forEach(f => { if (f.liga?.e === e.id) delete f.liga; }); tocar(); ir({ v: 'area', p: rota.p, a: rota.a });
+  };
+}
+
+/* ---------- Leituras do laser da área ---------- */
+function vLeituras() {
+  const a = area(), ls = [...a.leituras].sort((x, y) => y.ts - x.ts);
+  app.innerHTML = `<div class="card"><p class="muted" style="margin-top:0">Toda medida do laser feita nesta área fica aqui. ✓ = laser · ✎ = digitada · ⇩ = importada do MeasureOn.</p>
   <div class="row"><input id="manual" inputmode="decimal" placeholder="Digitar medida (mm)"><button id="addM" style="flex:0 0 auto">Adicionar</button></div>
   <div class="row" style="margin-top:8px"><button class="btn2" id="impX">Importar planilha MeasureOn (.xls)</button></div></div>
   <div class="card"><table><tr><th></th><th class="num">Medida</th><th>Nome</th><th>Quando</th><th></th></tr>
   ${ls.map(l => `<tr><td>${oTag(l.o)}</td><td class="num"><b>${fmm(l.mm)}</b></td><td><input data-ln="${l.id}" value="${esc(l.nome)}" placeholder="ex.: bancada" style="padding:5px"></td><td class="muted">${fdt(l.ts)}${l.grupo ? '<br>' + esc(l.grupo) : ''}</td><td><button class="small btnbad" data-ld="${l.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sem leituras.</td></tr>'}
   </table></div>`;
   document.getElementById('addM').onclick = () => { const v = parseFloat(document.getElementById('manual').value.replace(',', '.')); if (!isNaN(v)) { a.leituras.push({ id: uid(), mm: v, o: 'manual', ts: Date.now(), nome: '' }); tocar(); render(); } };
-  el.querySelectorAll('[data-ln]').forEach(i => i.onchange = () => { a.leituras.find(l => l.id === i.dataset.ln).nome = i.value; tocar(); });
-  el.querySelectorAll('[data-ld]').forEach(b => b.onclick = () => { a.leituras = a.leituras.filter(l => l.id !== b.dataset.ld); tocar(); render(); });
+  app.querySelectorAll('[data-ln]').forEach(i => i.onchange = () => { a.leituras.find(l => l.id === i.dataset.ln).nome = i.value; tocar(); });
+  app.querySelectorAll('[data-ld]').forEach(b => b.onclick = () => { a.leituras = a.leituras.filter(l => l.id !== b.dataset.ld); tocar(); render(); });
   document.getElementById('impX').onclick = () => escolherArquivo('.xls', async f => importarXls(a, new Uint8Array(await f.arrayBuffer())));
 }
 
-/* ---------- Fotos com setas ---------- */
-function tFotos(el, a) {
-  el.innerHTML = `<div class="row" style="margin-bottom:10px"><button id="cam">📷 Tirar foto</button><button class="btn2" id="gal">Da galeria</button></div>
-  <div class="fotos">${a.fotos.map(f => `<div data-f="${f.id}" class="thumb"><img data-img="${f.id}" alt=""><svg data-th="${f.id}"></svg></div>`).join('')}</div>
-  ${a.fotos.length ? '' : '<p class="muted">Tire a foto do ambiente e marque as medidas com setas, como no MeasureOn.</p>'}`;
-  el.querySelectorAll('[data-img]').forEach(async img => {
-    const b = await DB.get('fotos', img.dataset.img); if (!b) return;
-    img.onload = () => {
-      const f = a.fotos.find(x => x.id === img.dataset.img), W = 1000, H = W * img.naturalHeight / img.naturalWidth;
-      const svg = el.querySelector(`[data-th="${f.id}"]`); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-      svg.innerHTML = f.setas.map((s, i) => setaSvg(setaGeo(s, i, W, H, 0.65 * W / img.clientWidth), false)).join('');
-    };
-    img.src = URL.createObjectURL(b);
-  });
-  el.querySelectorAll('[data-f]').forEach(d => d.onclick = () => ir({ v: 'foto', p: rota.p, a: rota.a, f: d.dataset.f }));
-  const add = async file => {
-    const blob = await reduzir(file); const id = uid();
-    await DB.put('fotos', id, blob); a.fotos.push({ id, setas: [], ts: Date.now() }); tocar(); ir({ v: 'foto', p: rota.p, a: rota.a, f: id });
-  };
-  document.getElementById('cam').onclick = () => { const i = document.getElementById('fcam'); i.onchange = () => i.files[0] && add(i.files[0]); i.value = ''; i.click(); };
-  document.getElementById('gal').onclick = () => escolherArquivo('image/*', add);
-}
 async function reduzir(file, max = 2000) {
   const bmp = await createImageBitmap(file); const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
@@ -494,12 +930,22 @@ async function vFoto() {
   document.getElementById('fzf').onclick = ajustar;
   document.getElementById('fmais').onclick = () => {
     const d = document.getElementById('dlg');
-    d.innerHTML = `<b>Foto</b><div style="display:grid;gap:8px;margin-top:10px"><button class="btn2" id="mj">Baixar foto com medidas</button><button class="btnbad" id="mx">Excluir foto</button><button id="mf">Fechar</button></div>`;
+    const esb = a.esbocos.find(x => x.id === f.liga?.e);
+    d.innerHTML = `<b>Foto</b><div style="display:grid;gap:8px;margin-top:10px"><button class="btn2" id="ml">${f.liga && esb ? `🔗 Ligada a ${esc(esb.nome)} · parede ${f.liga.w + 1} — mudar` : '🔗 Ligar a uma parede do esboço'}</button>${f.liga ? '<button class="btn2" id="mu">Desligar da parede</button>' : ''}<button class="btn2" id="mj">Baixar foto com medidas</button><button class="btnbad" id="mx">Excluir foto</button><button id="mf">Fechar</button></div>`;
     d.showModal(); d.querySelector('#mf').onclick = () => d.close();
     d.querySelector('#mj').onclick = () => { d.close(); fotoComMedidas(img, f); };
+    d.querySelector('#ml').onclick = () => {
+      d.close(); const es = a.esbocos.filter(x => x.pts.length > 1);
+      if (!es.length) return aviso('Sem esboço', 'Desenhe o esboço do cômodo na base primeiro; depois ligue a foto à parede.');
+      const vai = e2 => ir({ v: 'esb', p: rota.p, a: rota.a, e: e2.id, pick: f.id });
+      if (es.length === 1) return vai(es[0]);
+      d.innerHTML = `<b>Qual esboço?</b><div style="display:grid;gap:8px;margin-top:10px">${es.map((x, i) => `<button class="btn2" data-i="${i}">${esc(x.nome)}</button>`).join('')}</div>`; d.showModal();
+      d.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { d.close(); vai(es[+b.dataset.i]); });
+    };
+    d.querySelector('#mu')?.addEventListener('click', () => { delete f.liga; tocar(); d.close(); toast('Foto desligada da parede.'); });
     d.querySelector('#mx').onclick = async () => {
       d.close(); if (!await confirmar('Excluir esta foto e suas setas?')) return;
-      await DB.del('fotos', f.id); a.fotos = a.fotos.filter(x => x !== f); tocar(); ir({ v: 'area', p: rota.p, a: rota.a, tab: 'fotos' });
+      await DB.del('fotos', f.id); a.fotos = a.fotos.filter(x => x !== f); tocar(); ir({ v: 'area', p: rota.p, a: rota.a });
     };
   };
   await new Promise(ok => { img.onload = ok; img.src = URL.createObjectURL(blob); });
@@ -522,11 +968,6 @@ function fotoComMedidas(img, f) {
   });
   c.toBlob(b => baixar(`${proj().nome}_${area().nome}_foto.jpg`, b), 'image/jpeg', 0.9);
 }
-function tNota(el, a) {
-  el.innerHTML = `<div class="card"><textarea id="nota" rows="10" placeholder="Observações da visita: tomadas, pontos de água, gás, interferências…">${esc(a.nota)}</textarea></div>`;
-  document.getElementById('nota').oninput = e => { a.nota = e.target.value; tocar(); };
-}
-
 /* ===================== Campo-alvo do laser ===================== */
 // O campo com foco (amarelo) recebe a próxima medida do laser.
 let alvo = null;
@@ -536,25 +977,6 @@ function focarAlvo(inp, aplicar) {
   document.querySelectorAll('input.alvo').forEach(x => x.classList.remove('alvo'));
   inp.classList.add('alvo'); inp.focus({ preventScroll: false });
   alvo = { inp, aplicar };
-}
-function ligarMedidas(root, a, foto) {
-  root.querySelectorAll('[data-mm]').forEach(inp => {
-    const [tipo, idx] = inp.dataset.mm.split(':');
-    const set = (v, o) => {
-      if (tipo === 'altura') { a.altura = v; a.alturaO = o; }
-      else if (tipo === 'parede') { a.paredes[idx].mm = v; a.paredes[idx].o = o; }
-      else if (tipo === 'seta') { foto.setas[idx].mm = v; foto.setas[idx].o = o; }
-      tocar();
-    };
-    inp.onfocus = () => focarAlvo(inp, v => { set(v, 'laser'); inp.value = Math.round(v); proximoAlvo(inp); });
-    inp.onchange = () => { const v = parseFloat(inp.value.replace(',', '.')); set(isNaN(v) ? null : v, isNaN(v) ? null : 'manual'); render(); };
-  });
-}
-async function proximoAlvo(inp) {
-  const todos = [...document.querySelectorAll('[data-mm]')]; const i = todos.indexOf(inp);
-  const y = window.scrollY; await render(); window.scrollTo(0, y);
-  const nx = [...document.querySelectorAll('[data-mm]')][i + 1];
-  if (nx && !nx.value) focarAlvo(nx); else alvo = null;
 }
 
 /* ===================== Laser Bosch GLM (Bluetooth LE) ===================== */
@@ -608,7 +1030,7 @@ function receber(mm, o) {
   if (area()) { area().leituras.push({ id: uid(), mm, o, ts: Date.now(), nome: '' }); tocar(); }
   else { S.leiturasSoltas.push({ id: uid(), mm, o, ts: Date.now() }); salvar(); }
   if (alvo && document.body.contains(alvo.inp)) alvo.aplicar(mm);
-  else if (rota.v === 'area' && rota.tab === 'leituras') render();
+  else if (rota.v === 'leituras') render();
   renderChips(true); toast(`${fmm(mm)} ✓`, 1200);
 }
 function renderChips(novo) {
@@ -624,18 +1046,20 @@ function baixar(nome, data, tipo) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nm; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 // DXF R12 ASCII, unidades em metros, só LINE, camadas no padrão do MeasureOn.
-function dxf(a, tres) {
-  const g = geometria(a), H = (+a.altura || 0) / 1000, out = [];
+function dxf(e, tres) {
+  const g = esbGeo(e), H = (+e.altura || 0) / 1000, out = [];
   const f = n => (Math.round(n * 1e6) / 1e6).toString();
   const line = (ly, p, q) => out.push('0', 'LINE', '8', ly, '10', f(p[0]), '20', f(p[1]), '30', f(p[2] || 0), '11', f(q[0]), '21', f(q[1]), '31', f(q[2] || 0));
-  const P = g.pts.map(([x, y]) => [x / 1000, y / 1000]);
-  a.paredes.forEach((w, i) => {
+  // tela tem y para baixo; no CAD y é para cima
+  const P = g.P.map(([x, y]) => [x / 1000, -y / 1000]);
+  for (let i = 0; i < g.n; i++) {
     const p = P[i], q = P[i + 1];
     line('Bosch_MeasureOn_Wall', [...p, 0], [...q, 0]);
     if (tres && H) { line('Bosch_MeasureOn_Wall', [...p, H], [...q, H]); line('Bosch_MeasureOn_Wall', [...p, 0], [...p, H]); }
-  });
-  for (const o of a.aberturas) {
-    const i = +o.parede; if (!P[i + 1]) continue;
+  }
+  if (tres && H && !e.fechado && g.n) { const q = P[g.n]; line('Bosch_MeasureOn_Wall', [...q, 0], [...q, H]); }
+  for (const o of e.aberturas) {
+    const i = +o.parede; if (i >= g.n) continue;
     const [x1, y1] = P[i], [x2, y2] = P[i + 1], Lw = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / Lw, uy = (y2 - y1) / Lw;
     const d1 = (+o.dist || 0) / 1000, d2 = d1 + (+o.larg || 0) / 1000, z1 = tres ? (+o.peit || 0) / 1000 : 0, z2 = tres ? z1 + (+o.alt || 0) / 1000 : 0;
     const A = [x1 + ux * d1, y1 + uy * d1], B = [x1 + ux * d2, y1 + uy * d2], ly = o.tipo === 'porta' ? 'Bosch_MeasureOn_Door' : 'Bosch_MeasureOn_Window';
@@ -646,7 +1070,7 @@ function dxf(a, tres) {
 }
 async function exportarProjeto(p) {
   const fotos = {};
-  for (const a of p.areas) for (const f of a.fotos) { const b = await DB.get('fotos', f.id); if (b) fotos[f.id] = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); }
+  for (const a of p.areas) for (const f of [...a.fotos, ...(a.scans || [])]) { const b = await DB.get('fotos', f.id); if (b) fotos[f.id] = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); }
   baixar(`${p.nome}.sawmed.json`, JSON.stringify({ formato: 'saw-medicao', versao: 1, exportado: new Date().toISOString(), projeto: p, fotos }), 'application/json');
 }
 async function importarProjeto(f) {
@@ -655,6 +1079,7 @@ async function importarProjeto(f) {
   const ex = S.projetos.find(x => x.id === j.projeto.id);
   if (ex && !await confirmar(`“${ex.nome}” já existe neste aparelho. Substituir pela versão do arquivo?`)) return;
   for (const [id, url] of Object.entries(j.fotos || {})) await DB.put('fotos', id, await (await fetch(url)).blob());
+  j.projeto.areas.forEach(migrarArea);
   S.projetos = S.projetos.filter(x => x.id !== j.projeto.id); S.projetos.push(j.projeto); await salvar();
   toast('Projeto importado.'); ir({ v: 'proj', p: j.projeto.id });
 }
@@ -755,6 +1180,7 @@ function menuGeral() {
 (async () => {
   await DB.open();
   const e = await DB.get('kv', 'estado'); if (e) S = { leiturasSoltas: [], ...e };
+  S.projetos.forEach(p => p.areas.forEach(migrarArea));
   if (navigator.storage?.persist) navigator.storage.persist();
   render();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
