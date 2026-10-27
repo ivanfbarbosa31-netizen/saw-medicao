@@ -1,1 +1,1 @@
-{"name":"SAW Medição","short_name":"SAW Medição","start_url":".","display":"standalone","background_color":"#f4f5f7","theme_color":"#1f2a37","lang":"pt-BR","icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml"}]}
+{"name":"Esquadro","short_name":"Esquadro","description":"Medição de ambientes com laser, esboço e fotos","start_url":".","display":"standalone","background_color":"#f3efe7","theme_color":"#f3efe7","lang":"pt-BR","icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}
