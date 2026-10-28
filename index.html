@@ -1673,14 +1673,68 @@ async function lerBackup(f) {
   for (const [id, url] of Object.entries(j.fotos || {})) fotos[mapa.get(id) || id] = url;
   return { projetos: proj.projetos, leiturasSoltas: proj.leiturasSoltas, fotos, esquema: j.esquema || 1, app: j.app || 'v0.6 ou anterior' };
 }
+// Mesclagem por id: nunca sobrescreve às cegas. Projeto novo entra; projeto existente mantém a versão mais nova
+// (por alterado_em), área a área; o que só existe no aparelho nunca é removido.
+const naLixeira = (tipo, id) => (S.lixeira || []).some(x => x.tipo === tipo && x.dado.id === id);
+function planejarMesclagem(b) {
+  const pl = { novos: [], mudar: [], iguais: [], lixeira: [], areasNovas: 0, areasAtualizadas: 0, areasMantidas: 0, areasLixeira: 0, leituras: 0 };
+  for (const pin of b.projetos) {
+    if (naLixeira('projeto', pin.id)) { pl.lixeira.push(pin); continue; }
+    const loc = S.projetos.find(p => p.id === pin.id);
+    if (!loc) { pl.novos.push(pin); pl.areasNovas += pin.areas.length; continue; }
+    const ac = { pin, loc, arquivoMaisNovo: pin.alterado_em > loc.alterado_em, novas: [], trocar: [] };
+    for (const ain of pin.areas) {
+      if (naLixeira('area', ain.id)) { pl.areasLixeira++; continue; }
+      const aloc = loc.areas.find(a => a.id === ain.id);
+      if (!aloc) { ac.novas.push(ain); pl.areasNovas++; }
+      else if (ain.alterado_em > aloc.alterado_em) { ac.trocar.push(ain); pl.areasAtualizadas++; }
+      else pl.areasMantidas++;
+    }
+    (ac.arquivoMaisNovo || ac.novas.length || ac.trocar.length ? pl.mudar : pl.iguais).push(ac);
+  }
+  const ids = new Set(S.leiturasSoltas.map(l => l.id)); pl.leituras = (b.leiturasSoltas || []).filter(l => !ids.has(l.id)).length;
+  pl.nada = !pl.novos.length && !pl.mudar.length && !pl.leituras;
+  return pl;
+}
+function dialogoMesclar(pl, b) {
+  return new Promise(ok => {
+    const d = document.getElementById('dlg'), li = (t, l) => l.length ? `<p><b>${t}</b><br>${l.map(x => esc(x)).join('<br>')}</p>` : '';
+    d.innerHTML = `<b>Importar backup</b><p class="muted">Arquivo do app ${esc(b.app)} (esquema ${b.esquema}). Nada será apagado: o que só existe neste aparelho continua aqui.</p>
+     ${li('Projetos novos', pl.novos.map(p => p.nome + ' (' + p.areas.length + ' área(s))'))}
+     ${li('Atualizar com a versão do arquivo (mais nova)', pl.mudar.map(a => a.loc.nome + ': ' + [a.arquivoMaisNovo ? 'dados do projeto' : '', a.trocar.length ? a.trocar.length + ' área(s) atualizada(s)' : '', a.novas.length ? a.novas.length + ' área(s) nova(s)' : ''].filter(Boolean).join(', ')))}
+     ${li('Já iguais ou mais novos neste aparelho (mantidos)', pl.iguais.map(a => a.loc.nome))}
+     ${pl.areasMantidas ? `<p class="muted">${pl.areasMantidas} área(s) mais novas neste aparelho serão mantidas.</p>` : ''}
+     ${li('Na Lixeira (ignorados; restaure pela Lixeira se quiser)', pl.lixeira.map(p => p.nome))}
+     ${pl.leituras ? `<p>${pl.leituras} leitura(s) soltas novas.</p>` : ''}
+     ${pl.nada ? '<p><b>Nada a mesclar:</b> este aparelho já tem tudo o que está no arquivo (ou versões mais novas).</p>' : ''}
+     <div class="row" style="margin-top:12px"><button class="btn2" id="mcC">Cancelar</button>${pl.nada ? '' : '<button id="mcO">Mesclar</button>'}</div>`;
+    d.showModal(); d.querySelector('#mcC').onclick = () => { d.close(); ok(false); }; d.querySelector('#mcO')?.addEventListener('click', () => { d.close(); ok(true); });
+  });
+}
+async function gravarFotosDaArea(a, fotos) { for (const f of blobsDaArea(a)) if (fotos[f.id]) await DB.put('fotos', f.id, await (await fetch(fotos[f.id])).blob()); }
+async function aplicarMesclagem(pl, b) {
+  await snapshot('Antes de importar backup', true);
+  for (const p of pl.novos) { for (const a of p.areas) await gravarFotosDaArea(a, b.fotos); S.projetos.push(p); }
+  for (const ac of pl.mudar) {
+    const { pin, loc } = ac;
+    if (ac.arquivoMaisNovo) { loc.nome = pin.nome; loc.pv = pin.pv ?? null; loc.cliente = { ...pin.cliente }; loc.alt = Math.max(loc.alt || 0, pin.alt || 0); }
+    for (const a of ac.trocar) { await gravarFotosDaArea(a, b.fotos); const i = loc.areas.findIndex(x => x.id === a.id); loc.areas[i] = a; }
+    for (const a of ac.novas) { await gravarFotosDaArea(a, b.fotos); loc.areas.push(a); }
+    loc.alterado_em = Math.max(loc.alterado_em, pin.alterado_em);
+  }
+  const ids = new Set(S.leiturasSoltas.map(l => l.id));
+  for (const l of b.leiturasSoltas || []) if (!ids.has(l.id)) S.leiturasSoltas.push(l);
+  S.projetos.forEach(p => p.areas.forEach(migrarArea));
+  await salvar();
+}
 async function importarProjeto(f) {
   const b = await lerBackup(f);
   if (!b || !b.projetos.length) return aviso('Arquivo inválido', 'Não é um backup do NYCXO Medida.');
-  const p = b.projetos[0], ex = S.projetos.find(x => x.id === p.id);
-  if (ex && !await confirmar(`“${ex.nome}” já existe neste aparelho. Substituir pela versão do arquivo?`)) return;
-  for (const [id, url] of Object.entries(b.fotos)) await DB.put('fotos', id, await (await fetch(url)).blob());
-  S.projetos = S.projetos.filter(x => x.id !== p.id); S.projetos.push(p); await salvar();
-  toast('Projeto importado.'); ir({ v: 'proj', p: p.id });
+  const pl = planejarMesclagem(b);
+  if (!await dialogoMesclar(pl, b)) return;
+  await aplicarMesclagem(pl, b);
+  toast('Backup mesclado.');
+  ir(b.projetos.length === 1 && S.projetos.some(p => p.id === b.projetos[0].id) ? { v: 'proj', p: b.projetos[0].id } : { v: 'home' });
 }
 
 /* ===================== Importar planilha do laser (.xls BIFF8) ===================== */
