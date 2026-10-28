@@ -1197,7 +1197,16 @@ function removerParede(e, i, a) {
   e.pts = g.P.slice(0, e.pts.length).map(p => p.slice());
   if (e.fechado) {
     for (let r = 0; r < i + 1; r++) { e.pts.push(e.pts.shift()); e.walls.push(e.walls.shift()); remapear(a, e, w => ({ w: (w - 1 + n) % n })); }
-    e.fechado = false; e.walls.pop(); remapear(a, e, w => w === n - 1 ? null : { w }); return true;
+    e.fechado = false; e.walls.pop(); remapear(a, e, w => w === n - 1 ? null : { w });
+    // Reesquadra: refaz a cadeia aberta com a DIREÇÃO original de cada parede que ficou (a parede que fechava o contorno
+    // tinha a direção recalculada pela folga de fechamento, o que entortava o canto). Direções a menos de 2° de um
+    // eixo (0/90/180/270) viram exatamente o eixo.
+    const SNAP = 2 * Math.PI / 180, ord = [];
+    for (let r = 0; r < n - 1; r++) ord.push((i + 1 + r) % n);
+    const dir = j => { let [ux, uy] = g.dir[j]; const ang = Math.atan2(uy, ux), q = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2); if (Math.abs(ang - q) < SNAP) { ux = Math.round(Math.cos(q)); uy = Math.round(Math.sin(q)); } return [ux, uy]; };
+    const novos = [g.P[(i + 1) % n].slice()];
+    for (const j of ord) { const p = novos[novos.length - 1], [ux, uy] = dir(j); novos.push([p[0] + ux * g.len[j], p[1] + uy * g.len[j]]); }
+    e.pts = novos; return true;
   }
   if (i === 0) { e.pts.shift(); e.walls.shift(); remapear(a, e, w => w === 0 ? null : { w: w - 1 }); return true; }
   if (i === n - 1) { e.pts.pop(); e.walls.pop(); remapear(a, e, w => w === n - 1 ? null : { w }); return true; }
