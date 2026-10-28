@@ -1859,11 +1859,14 @@ function aviso(tit, html) {
   d.innerHTML = `<b>${esc(tit)}</b><p>${html}</p><button id="ak">OK</button>`; d.showModal(); d.querySelector('#ak').onclick = () => d.close();
 }
 function escolherArquivo(accept, fn) { const i = document.getElementById('ffile'); i.accept = accept; i.value = ''; i.onchange = () => i.files[0] && fn(i.files[0]); i.click(); }
+// iPhone/iPad (inclui iPad que se apresenta como Mac) e app já instalado na Tela de Início.
+const ehIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const emApp = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 function menuGeral() {
   const d = document.getElementById('dlg');
   d.innerHTML = `<b>Menu</b>
    <div style="display:grid;gap:8px;margin-top:10px">
-    ${navigator.standalone || matchMedia('(display-mode: standalone)').matches ? '' : '<button class="btn2" id="mInst">Instalar no iPhone</button>'}
+    ${ehIOS() && !emApp() ? '<button class="btn2" id="mInst">Instalar no iPhone</button>' : ''}
     <button class="btn2" id="mCfg">Configurações</button>
     ${S.lixeira.length ? `<button class="btn2" id="mLix">Lixeira (${S.lixeira.length})</button>` : ''}
     <button class="btn2" id="mi">Importar projeto (backup .json)</button>
@@ -2342,7 +2345,9 @@ async function migrarDados() {
   limparLixeira().catch(() => { });
   iniciarPersist().then(() => { if (rota.v === 'cfg') render(); });
   render();
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(r => r.active && r.active.postMessage('guardar-libs')).catch(() => { });
+  }
 })();
 </script>
 </body>
