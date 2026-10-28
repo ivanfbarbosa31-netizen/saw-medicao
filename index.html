@@ -117,10 +117,44 @@ pre.diag{font-size:11px;max-height:180px;overflow:auto;background:var(--tx);colo
 .aviso-txt{font-size:13px;color:var(--tx);background:var(--bg);border-radius:12px;padding:10px 12px;margin:12px 0 0}
 .vazio{padding:28px 18px;text-align:center;color:var(--mut)}
 .vazio svg.i{width:42px;height:42px;stroke-width:1.3;margin-bottom:8px;color:var(--acc)}
+/* alvos de toque de pelo menos 44 px */
+button,.btn,summary{min-height:44px}
+summary{display:flex;align-items:center;cursor:pointer}
+header button{width:44px;height:44px;flex:0 0 44px}
+.small{min-height:44px;min-width:44px;padding:10px 14px}
+.fbar .small{padding:10px 12px}
+.ftool .btn2,.zoomkit .btn2{min-width:44px;min-height:44px}
+.zoomkit{padding:0}
+.ftool{gap:4px}
+.ftool .btn2.small{padding:10px 10px;gap:4px;font-size:13px}
+.seg button{min-height:40px;padding:8px 12px}
+.cor{width:44px;height:44px;padding:0;border:10px solid transparent;background-clip:padding-box}
+.cor.on{box-shadow:none;outline:2px solid var(--tx);outline-offset:-4px}
+#laserbar button{min-height:44px}
+#chips span{min-height:44px;display:inline-flex;align-items:center}
+input,select,textarea{min-height:44px}
+.fbar input{padding:10px}
+label.mini input{padding:10px 6px}
+label.sw{min-height:44px;margin:0;padding:6px 0}
+label.sw input{width:24px;height:24px;flex:0 0 24px}
+body{padding-bottom:calc(108px + env(safe-area-inset-bottom))}
+/* teclado do iPhone: --kb vem do visualViewport e sobe as barras e os diálogos */
+:root{--kb:0px}
+#laserbar{bottom:calc(10px + env(safe-area-inset-bottom) + var(--kb))}
+.fbar{bottom:calc(80px + env(safe-area-inset-bottom) + var(--kb))}
+.toast{bottom:calc(92px + env(safe-area-inset-bottom) + var(--kb))}
+dialog:modal{bottom:var(--kb);max-height:calc(100dvh - var(--kb) - 24px);overflow:auto}
+/* feedback de salvar, chevron e estados vazios */
+.salvo{font:600 12px var(--mono);color:var(--ok);opacity:0;transition:opacity .25s;white-space:nowrap}
+.salvo.on{opacity:1}
+.list-item>svg.i{color:var(--mut);width:20px;height:20px}
+.vazio b{display:block;color:var(--tx);font-size:15px;margin-bottom:2px}
+.sobre dl{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;margin:10px 0 0;font-size:14px}
+.sobre dt{color:var(--mut)} .sobre dd{margin:0;text-align:right;font-family:var(--mono);font-size:13px;word-break:break-all}
 </style>
 </head>
 <body>
-<header><button id="voltar" aria-label="Voltar"><svg class="i" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="titulo"><span class="marca">NYCXO <i>medida</i></span></h1><button id="menu" aria-label="Menu"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button></header>
+<header><button id="voltar" aria-label="Voltar"><svg class="i" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="titulo"><span class="marca">NYCXO <i>medida</i></span></h1><span id="salvo" class="salvo" aria-live="polite"></span><button id="menu" aria-label="Menu"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button></header>
 <main id="app"></main>
 <div id="laserbar">
   <div class="st"><span class="dot" id="ldot"></span><span id="lst">Laser off</span></div>
@@ -282,7 +316,9 @@ function carimbar(estado, semTumulo) {
   } else for (const id of [...FP.keys()]) if (!vistos.has(id)) { FP.delete(id); TIPOS.delete(id); }
 }
 function reiniciarFP() { FP.clear(); TIPOS.clear(); carimbar(S, true); }
-const salvar = () => { carimbar(S); registrarAlteracao(); return DB.put('kv', 'estado', S); };
+let salvoT = null;
+function sinalSalvo() { const el = document.getElementById('salvo'); if (!el) return; el.textContent = 'Salvo ✓'; el.classList.add('on'); clearTimeout(salvoT); salvoT = setTimeout(() => el.classList.remove('on'), 1600); }
+const salvar = () => { carimbar(S); registrarAlteracao(); const r = DB.put('kv', 'estado', S); r.then(sinalSalvo, () => { const el = document.getElementById('salvo'); if (el) { el.textContent = 'Não salvou!'; el.classList.add('on'); } }); return r; };
 function registrarAlteracao() { S.bkp ??= { ultimo: null, n: 0, desde: null }; S.bkp.n++; S.bkp.desde ??= Date.now(); agendarSnap(); }
 
 /* ===================== Proteção dos dados: armazenamento persistente, cópias automáticas e backup ===================== */
@@ -346,7 +382,7 @@ function precisaBackup() {
 const quando = ms => ms ? fdt(ms) : 'nunca';
 function bannerBackup() {
   if (!precisaBackup()) return '';
-  return `<div class="aviso-bkp" id="bkpBanner"><div class="grow"><b>Salvar uma cópia</b><div class="muted">${S.bkp.ultimo ? 'Última cópia: ' + quando(S.bkp.ultimo) : 'Você ainda não salvou nenhuma cópia'} · ${S.bkp.n} alteração(ões) desde então. No iPhone, escolha Salvar em Arquivos ou iCloud.</div></div><button id="bkpSalvar">Salvar cópia</button></div>`;
+  return `<div class="aviso-bkp" id="bkpBanner"><div class="grow"><b>Salvar uma cópia</b><div class="muted">${S.bkp.ultimo ? 'Última cópia: ' + quando(S.bkp.ultimo) : 'Você ainda não salvou nenhuma cópia'} · ${S.bkp.n} ${S.bkp.n === 1 ? 'alteração' : 'alterações'} desde então. No iPhone, escolha Salvar em Arquivos ou iCloud.</div></div><button id="bkpSalvar">Salvar cópia</button></div>`;
 }
 function ligarBanner() { document.getElementById('bkpSalvar')?.addEventListener('click', async ev => { ev.target.disabled = true; try { await exportarTudo(); } finally { render(); } }); }
 // Entrega o arquivo: compartilhar (Arquivos/iCloud) no celular; baixar no computador.
@@ -411,6 +447,7 @@ const fdt = ts => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: 
 const ORIG = { laser: ['✓', 'o-laser', 'laser'], manual: ['✎', 'o-manual', 'digitado'], importada: ['⇩', 'o-importada', 'importada'] };
 // Ícones de traço (24×24)
 const IC = {
+  chev: '<path d="M9 5l7 7-7 7"/>', escudo: '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
   lapis: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>', camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   galeria: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="9" r="1.3"/>',
   nota: '<path d="M6 4h9l4 4v12H6z"/><path d="M15 4v4h4M9 12h7M9 16h5"/>', cubo: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/>',
@@ -427,6 +464,15 @@ const ic = n => `<svg class="i" viewBox="0 0 24 24">${IC[n]}</svg>`;
 const oTag = o => { const x = ORIG[o] || ORIG.manual; return `<span class="${x[1]}" title="${x[2]}">${x[0]}</span>`; };
 function toast(m, t = 2200) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = m; document.body.appendChild(d); setTimeout(() => d.remove(), t); }
 
+// Teclado do iPhone: sobe a barra do laser, a barra de medida e os diálogos para ficarem acima do teclado.
+function ajustarTeclado() {
+  const vv = window.visualViewport; if (!vv) return;
+  const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+  document.documentElement.style.setProperty('--kb', (kb > 80 ? kb : 0) + 'px');
+}
+if (window.visualViewport) { visualViewport.addEventListener('resize', ajustarTeclado); visualViewport.addEventListener('scroll', ajustarTeclado); }
+document.addEventListener('focusin', e => { const t = e.target; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && !t.closest('.fbar, dialog')) setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300); });
+
 /* ===================== Navegação ===================== */
 let rota = { v: 'home' };
 const app = document.getElementById('app');
@@ -434,7 +480,7 @@ const proj = () => S.projetos.find(p => p.id === rota.p);
 const area = () => proj()?.areas.find(a => a.id === rota.a);
 function ir(r) { rota = r; alvo = null; render(); window.scrollTo(0, 0); }
 document.getElementById('voltar').onclick = () => {
-  if (rota.v === 'cfg') return ir(rota.volta || { v: 'home' });
+  if (rota.v === 'cfg' || rota.v === 'sobre') return ir(rota.volta || { v: 'home' });
   if (rota.v === 'foto' && rota.de === 'esb') ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
   else if (rota.v === 'esb' && rota.pick) ir({ v: 'foto', p: rota.p, a: rota.a, f: rota.pick });
   else if (['foto', 'esb', 'leituras'].includes(rota.v)) ir({ v: 'area', p: rota.p, a: rota.a });
@@ -453,6 +499,7 @@ async function render() {
   else if (rota.v === 'esb') { const en = area().esbocos.find(x => x.id === rota.e)?.nome || 'esboço'; t.textContent = en === area().nome ? en + ' · esboço' : area().nome + ' · ' + en; vEsboco(); }
   else if (rota.v === 'leituras') { t.textContent = area().nome + ' · leituras'; vLeituras(); }
   else if (rota.v === 'cfg') { t.textContent = 'Configurações'; vCfg(); }
+  else if (rota.v === 'sobre') { t.textContent = 'Sobre'; vSobre(); }
   else if (rota.v === 'foto') { t.textContent = area().nome + ' · foto'; await vFoto(); }
   renderChips();
 }
@@ -463,11 +510,11 @@ function vHome() {
   app.innerHTML = `${bannerBackup()}
   <div class="row" style="margin-bottom:10px"><input id="busca" placeholder="Buscar projeto ou cliente"><button id="novoP" style="flex:0 0 auto">${ic('add')} Projeto</button></div>
   <div id="lista"></div>
-  ${ps.length ? '' : `<div class="card vazio">${ic('regua')}<br>Nenhum projeto ainda.<br>Crie um por obra ou cliente.</div>`}`;
+  ${ps.length ? '' : `<div class="card vazio">${ic('regua')}<b>Nenhum projeto ainda</b>Crie um por obra ou cliente.</div>`}`;
   const desenha = f => {
     document.getElementById('lista').innerHTML = ps.filter(p => !f || p.nome.toLowerCase().includes(f)).map(p => `
       <div class="list-item" data-id="${p.id}"><div class="grow"><div class="t">${esc(p.nome)}</div>
-      <div class="s">${p.areas.length} área(s) · ${fdt(p.alt)}</div></div><span>›</span></div>`).join('');
+      <div class="s">${p.areas.length} área(s) · ${fdt(p.alt)}</div></div>${ic('chev')}</div>`).join('');
     app.querySelectorAll('.list-item').forEach(el => el.onclick = () => ir({ v: 'proj', p: el.dataset.id }));
   };
   desenha(''); ligarBanner();
@@ -488,7 +535,7 @@ function vProj() {
   <div class="card"><div class="row"><b style="flex:1">Áreas / cômodos</b><button id="novaA" style="flex:0 0 auto" class="small">+ Área</button></div></div>
   <div id="areas">${p.areas.map(a => `
     <div class="list-item" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.nome)}</div>
-    <div class="s">${a.esbocos.length} esboço(s) · ${a.fotos.length} foto(s) · ${a.leituras.length} leitura(s) · ${fdt(a.data)}</div></div><span>›</span></div>`).join('') || '<div class="card muted">Crie uma área por cômodo (Cozinha, Banheiro…).</div>'}</div>
+    <div class="s">${a.esbocos.length} esboço(s) · ${a.fotos.length} foto(s) · ${a.leituras.length} leitura(s) · ${fdt(a.data)}</div></div>${ic('chev')}</div>`).join('') || `<div class="card vazio">${ic('regua')}<b>Nenhuma área ainda</b>Crie uma área por cômodo (Cozinha, Banheiro…).</div>`}</div>
   <details class="card"><summary><b>Dados do cliente</b></summary>
     ${CAMPOS.map(([k, l]) => `<label>${l}</label><input data-k="${k}" value="${esc(p.cliente[k])}">`).join('')}
   </details>
@@ -1877,16 +1924,18 @@ function menuGeral() {
    <div style="display:grid;gap:8px;margin-top:10px">
     ${ehIOS() && !emApp() ? '<button class="btn2" id="mInst">Instalar no iPhone</button>' : ''}
     <button class="btn2" id="mCfg">Configurações</button>
+    <button class="btn2" id="mSobre">Sobre o app</button>
     ${S.lixeira.length ? `<button class="btn2" id="mLix">Lixeira (${S.lixeira.length})</button>` : ''}
     <button class="btn2" id="mi">Importar projeto (backup .json)</button>
     <button class="btn2" id="mt">Testar recepção (medida simulada)</button>
     <button class="btn2" id="md">Diagnóstico do Bluetooth</button>
     <button class="btn2" id="mS">Procurar só trenas: ${soTrenas() ? "ligado" : "desligado"}</button>
     <button id="mf">Fechar</button></div>
-   <p class="muted">NYCXO Medida · v0.6 · ferramenta de apoio do NYCXO · dados guardados só neste aparelho. ${S.leiturasSoltas.length ? S.leiturasSoltas.length + ' leitura(s) feitas fora de uma área.' : ''}</p>`;
+   <p class="muted">NYCXO Medida · v${VERSAO_APP} · ferramenta de apoio do NYCXO · dados guardados só neste aparelho. ${S.leiturasSoltas.length ? S.leiturasSoltas.length + ' leitura(s) feitas fora de uma área.' : ''}</p>`;
   d.showModal();
   d.querySelector('#mf').onclick = () => d.close();
   d.querySelector('#mInst')?.addEventListener('click', () => aviso('Instalar no iPhone', 'No <b>Safari</b>, toque em <b>Compartilhar</b> (o quadrado com a seta) e depois em <b>Adicionar à Tela de Início</b>. O NYCXO Medida abre em tela cheia, com ícone próprio e funciona sem internet.<br><br>Para usar o laser por Bluetooth no iPhone, abra este mesmo endereço no navegador <b>Bluefy</b>.'));
+  d.querySelector('#mSobre').onclick = () => { d.close(); const volta = { ...rota }; ir({ v: 'sobre', volta }); };
   d.querySelector('#mCfg').onclick = () => { d.close(); const volta = { ...rota }; ir({ v: 'cfg', volta }); };
   d.querySelector('#mLix')?.addEventListener('click', () => { d.close(); const volta = { ...rota }; ir({ v: 'cfg', volta }); setTimeout(() => document.getElementById('dLix')?.scrollIntoView(), 50); });
   d.querySelector('#mi').onclick = () => { d.close(); escolherArquivo('.json,application/json', importarProjeto); };
@@ -1894,6 +1943,18 @@ function menuGeral() {
   d.querySelector('#mS').onclick = () => { try { localStorage.setItem('nycxo-medida-so-trenas', soTrenas() ? '0' : '1'); } catch (e) { } d.close(); toast('Procurar só trenas: ' + (soTrenas() ? 'ligado (lista só GLM, PLR, Bosch)' : 'desligado (lista todos os aparelhos)'), 3500); };
   d.querySelector('#md').onclick = () => { const I = L.info; const ap = I ? 'Aparelho: ' + I.nome + '\nId: ' + I.id + '\nServiços: ' + (Array.isArray(I.servicos) ? (I.servicos.join('\n  ') || 'nenhum visível') : (I.servicos || 'ainda não conectou')) + '\nPerfil usado: ' + (I.perfil || 'nenhum') + '\nCaracterísticas (entre os serviços conhecidos):\n  ' + ((I.carac || []).join('\n  ') || 'nenhuma visível') + '\nErro: ' + (I.erro || 'nenhum') : 'Nenhum aparelho escolhido ainda.';
     d.innerHTML = `<b>Diagnóstico do Bluetooth</b><pre class="diag">${esc(ap)}</pre><b>Pacotes recebidos</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
+}
+
+/* ===================== Sobre ===================== */
+const COMPILADO = '2026-10-28';
+async function vSobre() {
+  const n = resumoEstado(S), chave = (await caches.keys().catch(() => [])).find(k => k.startsWith('nycxo-medida-')) || 'sem cache';
+  app.innerHTML = `<div class="card sobre"><div class="row" style="gap:12px"><div class="list-item ico" style="flex:0 0 52px;height:52px;margin:0;padding:0;justify-content:center;cursor:default"><span class="logo" style="display:inline-block;width:28px;height:28px;border-radius:9px;background:var(--tx)"></span></div><div class="grow" style="flex:1"><b style="font-size:17px">NYCXO Medida</b><div class="muted">Versão ${VERSAO_APP} · ferramenta de apoio do NYCXO</div></div></div>
+   <dl><dt>Esquema de dados</dt><dd>${ESQUEMA}</dd><dt>Compilação</dt><dd>${COMPILADO}</dd><dt>Cache offline</dt><dd>${esc(chave)}</dd>
+   <dt>Projetos</dt><dd>${n.projetos}</dd><dt>Áreas / itens</dt><dd>${n.areas} / ${n.itens}</dd><dt>Armazenamento</dt><dd>${PERSIST.persistente ? 'persistente' : 'pode ser apagado'}</dd></dl></div>
+  <div class="card"><b>Dados</b><p class="muted">Os projetos ficam só neste aparelho e neste navegador. Salve cópias com frequência em Configurações.</p><button class="btn2" id="sbCfg" style="width:100%">Abrir Configurações</button></div>
+  <div class="card"><b>Componentes de código aberto</b><p class="muted">jsPDF (MIT) para o relatório em PDF · pdf.js (Apache 2.0) para ler plantas em PDF · three.js (MIT) para a visualização 3D.</p></div>`;
+  document.getElementById('sbCfg').onclick = () => ir({ v: 'cfg', volta: rota.volta || { v: 'home' } });
 }
 
 /* ===================== Configurações ===================== */
@@ -1936,7 +1997,7 @@ function vCfg() {
   <div class="card"><b>Medidas padrão de aberturas (mm)</b>
    <div class="row">${num('porta.larg', 'Porta — largura')}${num('porta.alt', 'Porta — altura')}</div>
    <div class="row">${num('janela.larg', 'Janela — largura')}${num('janela.alt', 'Janela — altura')}${num('janela.peit', 'Peitoril')}</div></div>
-  <p class="muted" style="text-align:center">NYCXO Medida · v0.6 · ferramenta de apoio do NYCXO</p>`;
+  <p class="muted" style="text-align:center">NYCXO Medida · v${VERSAO_APP} · <button class="btn2 small" id="cSobre" style="margin-left:6px">Sobre o app</button></p>`;
   const grava = () => { salvar(); };
   document.getElementById('cEmp').onchange = ev => { c.empresa = ev.target.value.trim(); grava(); };
   document.getElementById('cUsar').onchange = ev => { c.usarLogo = ev.target.checked; grava(); };
@@ -1949,6 +2010,7 @@ function vCfg() {
   document.getElementById('cLogo').onclick = () => escolherArquivo('image/*', async f => { c.logo = await logoPNG(f); grava(); render(); });
   document.getElementById('cLogoX')?.addEventListener('click', () => { c.logo = null; grava(); render(); });
   ligarDados();
+  document.getElementById('cSobre').onclick = () => { ir({ v: 'sobre', volta: rota.volta }); };
 }
 function cardDados() {
   const per = PERSIST.persistente, mb = v => v == null ? '–' : (v / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' MB';
