@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="mobile-web-app-capable" content="yes">
 <title>NYCXO Medida</title>
+<script type="importmap">{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <style>
 :root{--bg:#f3efe7;--card:#fffdf9;--tx:#1d1b18;--mut:#857c6f;--pri:#1d1b18;--acc:#e4572e;--acc2:#fde3d8;--ok:#0f5e59;--warn:#b7791f;--bad:#b3261e;--line:#e4dccf;--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -70,7 +71,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left}
 th{font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
 .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-.o-laser{color:var(--ok)} .o-manual{color:var(--warn)} .o-importada{color:var(--mut)}
+.o-lidar{color:#3f6fd0} .o-laser{color:var(--ok)} .o-manual{color:var(--warn)} .o-importada{color:var(--mut)}
 .muted{color:var(--mut);font-size:13px}
 .ftool{display:flex;gap:6px;align-items:center;margin-bottom:10px}
 .ftool .btn2{min-width:38px}
@@ -145,6 +146,9 @@ body{padding-bottom:calc(108px + env(safe-area-inset-bottom))}
 .toast{bottom:calc(92px + env(safe-area-inset-bottom) + var(--kb))}
 dialog:modal{bottom:var(--kb);max-height:calc(100dvh - var(--kb) - 24px);overflow:auto}
 /* feedback de salvar, chevron e estados vazios */
+.board3d{position:relative;height:min(56dvh,520px);min-height:300px;border-radius:20px;overflow:hidden;border:1px solid var(--line);background:var(--bg);margin-bottom:12px}
+.leg3d{position:absolute;left:10px;top:10px;display:flex;gap:10px;font:700 12px var(--mono);background:rgba(255,253,249,.88);padding:6px 12px;border-radius:999px;z-index:2;pointer-events:none}
+.c3msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px}
 .salvo{font:600 12px var(--mono);color:var(--ok);opacity:0;transition:opacity .25s;white-space:nowrap}
 .salvo.on{opacity:1}
 .list-item>svg.i{color:var(--mut);width:20px;height:20px}
@@ -164,6 +168,7 @@ dialog:modal{bottom:var(--kb);max-height:calc(100dvh - var(--kb) - 24px);overflo
 <dialog id="dlg"></dialog>
 <input type="file" id="fcam" accept="image/*" capture="environment" hidden>
 <input type="file" id="ffile" hidden>
+<script src="importar-scan.js"></script>
 <script>
 "use strict";
 /* ===================== Armazenamento (IndexedDB) ===================== */
@@ -412,7 +417,7 @@ async function exportarTudo() {
 
 // ---- Tabelas planas no formato de sincronização (medicao_*), geradas a partir do aninhado ----
 const iso = ms => ms == null ? null : new Date(ms).toISOString();
-const ORIGEM_TAB = { laser: 'laser', manual: 'digitada', importada: 'importada' };
+const ORIGEM_TAB = { laser: 'laser', manual: 'digitada', importada: 'importada', lidar: 'lidar' };
 const origemTab = o => ORIGEM_TAB[o] || 'estimada';
 function paraTabelas(projetos, leiturasSoltas = []) {
   const T = { medicao_projeto: [], medicao_area: [], medicao_item: [], medicao_valor: [], medicao_leitura_laser: [] };
@@ -427,7 +432,7 @@ function paraTabelas(projetos, leiturasSoltas = []) {
         T.medicao_item.push({ id: e.id, area_id: a.id, tipo: 'esboco', nome: e.nome, arquivo: null, dados: e, ...car(e) });
         e.walls.forEach((w, i) => val(w.id, e.id, 'parede:' + (i + 1), w.mm != null ? w.mm : g.len[i], w.mm != null ? w.o : null, w));
         if (e.altura != null) val(uuidDet(e.id + '#altura'), e.id, 'altura', e.altura, e.alturaO, e);
-        e.aberturas.forEach((o, i) => { for (const c of ['larg', 'alt', 'peit']) if (o[c] != null) val(uuidDet(o.id + '#' + c), e.id, `abertura:${o.tipo}:${i + 1}:${c}`, +o[c], 'manual', o); });
+        e.aberturas.forEach((o, i) => { for (const c of ['larg', 'alt', 'peit']) if (o[c] != null) val(uuidDet(o.id + '#' + c), e.id, `abertura:${o.tipo}:${i + 1}:${c}`, +o[c], o.o || 'manual', o); });
       }
       for (const f of a.fotos) {
         T.medicao_item.push({ id: f.id, area_id: a.id, tipo: 'foto', nome: f.nome || null, arquivo: f.id, dados: f, ...car(f) });
@@ -444,7 +449,7 @@ function paraTabelas(projetos, leiturasSoltas = []) {
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmm = v => fL(v);
 const fdt = ts => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
-const ORIG = { laser: ['✓', 'o-laser', 'laser'], manual: ['✎', 'o-manual', 'digitado'], importada: ['⇩', 'o-importada', 'importada'] };
+const ORIG = { laser: ['✓', 'o-laser', 'laser'], manual: ['✎', 'o-manual', 'digitado'], importada: ['⇩', 'o-importada', 'importada'], lidar: ['◎', 'o-lidar', 'scan'] };
 // Ícones de traço (24×24)
 const IC = {
   chev: '<path d="M9 5l7 7-7 7"/>', escudo: '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
@@ -481,6 +486,7 @@ const area = () => proj()?.areas.find(a => a.id === rota.a);
 function ir(r) { rota = r; alvo = null; render(); window.scrollTo(0, 0); }
 document.getElementById('voltar').onclick = () => {
   if (rota.v === 'cfg' || rota.v === 'sobre') return ir(rota.volta || { v: 'home' });
+  if (rota.v === '3d') return ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
   if (rota.v === 'foto' && rota.de === 'esb') ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
   else if (rota.v === 'esb' && rota.pick) ir({ v: 'foto', p: rota.p, a: rota.a, f: rota.pick });
   else if (['foto', 'esb', 'leituras'].includes(rota.v)) ir({ v: 'area', p: rota.p, a: rota.a });
@@ -490,6 +496,7 @@ document.getElementById('voltar').onclick = () => {
 document.getElementById('menu').onclick = menuGeral;
 
 async function render() {
+  if (V3 && rota.v !== '3d') parar3D();
   document.body.classList.toggle('travado', ['area', 'esb', 'foto'].includes(rota.v));
   document.getElementById('voltar').style.display = rota.v === 'home' ? 'none' : '';
   const t = document.getElementById('titulo');
@@ -500,6 +507,7 @@ async function render() {
   else if (rota.v === 'leituras') { t.textContent = area().nome + ' · leituras'; vLeituras(); }
   else if (rota.v === 'cfg') { t.textContent = 'Configurações'; vCfg(); }
   else if (rota.v === 'sobre') { t.textContent = 'Sobre'; vSobre(); }
+  else if (rota.v === '3d') { t.textContent = area().nome + ' · 3D'; await v3D(); }
   else if (rota.v === 'foto') { t.textContent = area().nome + ' · foto'; await vFoto(); }
   renderChips();
 }
@@ -881,7 +889,7 @@ function menuAdicionar(a) {
   d.innerHTML = `<b>Criar novo</b><div class="grade4">
     <button class="btn2" data-n="esboco">${ic('lapis')}Esboço</button><button class="btn2" data-n="cam">${ic('camera')}Foto</button>
     <button class="btn2" data-n="gal">${ic('galeria')}Da galeria</button><button class="btn2" data-n="nota">${ic('nota')}Nota</button>
-    <button class="btn2" data-n="scan">${ic('cubo')}Scan 3D</button><button class="btn2" data-n="imp">${ic('baixar')}Importar planta</button></div><button id="nf" style="width:100%;margin-top:10px">Fechar</button>`;
+    <button class="btn2" data-n="scan">${ic('cubo')}Scan 3D</button><button class="btn2" data-n="imp">${ic('baixar')}Importar planta</button><button class="btn2" data-n="scanjson">${ic('cubo')}Scan (JSON)</button></div><button id="nf" style="width:100%;margin-top:10px">Fechar</button>`;
   d.showModal(); d.querySelector('#nf').onclick = () => d.close();
   d.querySelectorAll('[data-n]').forEach(b => b.onclick = async () => {
     d.close(); const n = b.dataset.n;
@@ -903,6 +911,8 @@ function menuAdicionar(a) {
         if (!r) { a.esbocos = a.esbocos.filter(x => x !== e); tocar(); return; }
         await carregarUrls(a); ir({ v: 'esb', p: rota.p, a: rota.a, e: e.id, escala: r === 'imagem' });
       });
+    } else if (n === 'scanjson') {
+      escolherArquivo('.json,application/json', f => importarScanArquivo(a, f));
     } else if (n === 'nota') {
       const o = { id: uid(), texto: '', pos: null }; a.notas.push(o); posicionarItens(a); tocar(); render(); editarNota(a, o);
     } else if (n === 'scan') {
@@ -933,8 +943,10 @@ async function abrirScan(a, o) {
 }
 function menuArea(a) {
   const d = document.getElementById('dlg');
-  d.innerHTML = `<b>${esc(a.nome)}</b><div style="display:grid;gap:8px;margin-top:10px"><button class="btn2" id="aPdf">${ic('baixar')} PDF deste ambiente</button><button class="btn2" id="ar">Renomear área</button><button class="btn2" id="ao">Organizar itens</button><button class="btnbad" id="ax">Excluir área</button><button id="af">Fechar</button></div>`;
+  d.innerHTML = `<b>${esc(a.nome)}</b><div style="display:grid;gap:8px;margin-top:10px">${a.esbocos.length ? `<button id="a3d">${ic('cubo')} Ver em 3D</button>` : ''}<button class="btn2" id="aImpScan">${ic('baixar')} Importar scan (JSON)</button><button class="btn2" id="aPdf">${ic('baixar')} PDF deste ambiente</button><button class="btn2" id="ar">Renomear área</button><button class="btn2" id="ao">Organizar itens</button><button class="btnbad" id="ax">Excluir área</button><button id="af">Fechar</button></div>`;
   d.showModal(); d.querySelector('#af').onclick = () => d.close();
+  d.querySelector('#a3d')?.addEventListener('click', () => { d.close(); ir({ v: '3d', p: rota.p, a: a.id, e: a.esbocos[0].id }); });
+  d.querySelector('#aImpScan').onclick = () => { d.close(); escolherArquivo('.json,application/json', f => importarScanArquivo(a, f)); };
   d.querySelector('#aPdf').onclick = () => { d.close(); gerarPDF(proj(), a).catch(err => aviso('Erro ao gerar PDF', esc(err.message))); };
   d.querySelector('#ar').onclick = async () => { d.close(); const n = await pedir('Renomear área', 'Nome', a.nome); if (n) { a.nome = n; tocar(); render(); } };
   d.querySelector('#ao').onclick = () => { d.close(); itensDaArea(a).forEach(it => it.o.pos = null); a.esbocos.forEach((e, i) => e.pos = { x: i * 1300, y: 0, w: 1200 }); posicionarItens(a); tocar(); render(); };
@@ -1196,6 +1208,7 @@ function vEsboco() {
   function menuEsboco() {
     const d = document.getElementById('dlg'), fd = e.fundo;
     d.innerHTML = `<b>${esc(e.nome)}</b><div style="display:grid;gap:8px;margin-top:10px">
+      <button id="m3dV">${ic('cubo')} Ver em 3D</button>
       <button class="btn2" id="mInfo">${ic('info')} Informações e DXF</button>
       <button class="btn2" id="mTxt">${ic('texto')} Adicionar texto na planta</button>
       <button class="btn2" id="mNota">${ic('nota')} ${e.nota ? 'Editar nota da planta' : 'Nota da planta'}</button>
@@ -1206,6 +1219,7 @@ function vEsboco() {
       <button class="btnbad" id="mFx">${ic('lixo')} Remover fundo</button>` : ''}
       <button id="mF">Fechar</button></div>`;
     d.showModal(); const q = x => d.querySelector(x);
+    q('#m3dV').onclick = () => { d.close(); ir({ v: '3d', p: rota.p, a: rota.a, e: e.id }); };
     q('#mF').onclick = () => d.close();
     q('#mInfo').onclick = () => { d.close(); infoEsboco(a, e); };
     q('#mTxt').onclick = () => { d.close(); modoEsp('texto', 'Toque onde quer colocar o texto'); };
@@ -1945,6 +1959,226 @@ function menuGeral() {
     d.innerHTML = `<b>Diagnóstico do Bluetooth</b><pre class="diag">${esc(ap)}</pre><b>Pacotes recebidos</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
 }
 
+/* ===================== Visualização 3D do ambiente (three.js em versão fixa, guardado no cache offline) ===================== */
+// O 3D é montado a partir do esboço medido: paredes com pé-direito e espessura, vãos de porta e janela recortados, piso.
+// Unidade do modelo: metros (1 unidade = 1 m), para o AR mostrar o cômodo em escala real.
+const COR_ORIGEM = { laser: 0x3f9f94, manual: 0xd9a441, importada: 0x9aa3b2, lidar: 0x5b8def, estimada: 0xb8b0a3 };
+const CHAR_ORIGEM = { laser: '✓', manual: '✎', importada: '⇩', lidar: '◎', estimada: '≈' };
+const NOME_ORIGEM = { laser: 'laser', manual: 'digitada', importada: 'importada', lidar: 'scan LiDAR', estimada: 'estimada' };
+const origemParede = w => w.mm == null ? 'estimada' : (COR_ORIGEM[w.o] ? w.o : 'importada');
+let T3 = null, V3 = null;
+async function carregar3D() {
+  if (T3) return T3;
+  const [THREE, oc, uz, gl] = await Promise.all([import('three'), import('three/addons/controls/OrbitControls.js'), import('three/addons/exporters/USDZExporter.js'), import('three/addons/exporters/GLTFExporter.js')]);
+  T3 = { THREE, OrbitControls: oc.OrbitControls, USDZExporter: uz.USDZExporter, GLTFExporter: gl.GLTFExporter };
+  return T3;
+}
+// Geometria pura (sem three.js): lista de retângulos de parede (com vãos recortados), vidros e piso. Em mm.
+function geometria3D(e, espMM) {
+  const g = esbGeo(e), n = g.n; if (!n) return null;
+  const H = +e.altura > 0 ? +e.altura : 2700, t = Math.max(10, +espMM || 100), fechado = e.fechado && n > 2;
+  const P = g.P.map(p => p.slice()); let folga = null;
+  if (fechado) { // distribui a folga de fechamento ao longo do perímetro (regra da bússola): qualquer medida nova mexe no desenho todo
+    const fx = P[n][0] - P[0][0], fy = P[n][1] - P[0][1]; folga = Math.hypot(fx, fy); let acc = 0; const per = g.len.reduce((a, b) => a + b, 0) || 1;
+    for (let k = 0; k <= n; k++) { P[k][0] -= fx * acc / per; P[k][1] -= fy * acc / per; if (k < n) acc += g.len[k]; }
+    P[n] = P[0].slice();
+  }
+  const dir = [], len = [];
+  for (let i = 0; i < n; i++) { const dx = P[i + 1][0] - P[i][0], dy = P[i + 1][1] - P[i][1], L = Math.hypot(dx, dy) || 1; dir.push([dx / L, dy / L]); len.push(L); }
+  let sa = 0; for (let i = 0; i < n; i++) sa += P[i][0] * P[i + 1][1] - P[i + 1][0] * P[i][1];
+  const horario = sa > 0, nor = i => horario ? [dir[i][1], -dir[i][0]] : [-dir[i][1], dir[i][0]];
+  const desl = (k, i) => [P[k][0] + nor(i)[0] * t, P[k][1] + nor(i)[1] * t];
+  const miter = (a, b, k) => {
+    const p1 = desl(k, a), p2 = desl(k, b), d1 = dir[a], d2 = dir[b], cr = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(cr) < 1e-3) return p2;
+    const s = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / cr, pt = [p1[0] + d1[0] * s, p1[1] + d1[1] * s];
+    return Math.hypot(pt[0] - P[k][0], pt[1] - P[k][1]) > 6 * t ? p2 : pt;
+  };
+  const C = [];
+  if (fechado) { for (let k = 0; k < n; k++) C.push(miter((k + n - 1) % n, k, k)); C.push(C[0]); }
+  else { C.push(desl(0, 0)); for (let k = 1; k < n; k++) C.push(miter(k - 1, k, k)); C.push(desl(n, n - 1)); }
+  const paredes = [], vidros = [];
+  for (let i = 0; i < n; i++) {
+    const L = len[i], aberturas = e.aberturas.filter(o => +o.parede === i).map(o => ({ o, u0: Math.max(0, Math.min(L, +o.dist || 0)), u1: Math.max(0, Math.min(L, (+o.dist || 0) + (+o.larg || 0))), v0: Math.max(0, +o.peit || 0), v1: Math.min(H, (+o.peit || 0) + (+o.alt || 0)) }))
+      .filter(x => x.u1 - x.u0 > 1 && x.v1 - x.v0 > 1).sort((a, b) => a.u0 - b.u0);
+    const livres = []; let fim = -1; for (const x of aberturas) if (x.u0 >= fim) { livres.push(x); fim = x.u1; }
+    const rets = []; let u = 0;
+    for (const x of livres) { if (x.u0 - u > 1) rets.push([u, x.u0, 0, H]); if (x.v0 > 1) rets.push([x.u0, x.u1, 0, x.v0]); if (H - x.v1 > 1) rets.push([x.u0, x.u1, x.v1, H]); u = x.u1; }
+    if (L - u > 1) rets.push([u, L, 0, H]);
+    const nn = nor(i), d = dir[i];
+    const quad = (u0, u1) => {
+      const A = [P[i][0] + d[0] * u0, P[i][1] + d[1] * u0], B = [P[i][0] + d[0] * u1, P[i][1] + d[1] * u1];
+      return [A, B, u1 > L - 0.5 ? C[i + 1] : [B[0] + nn[0] * t, B[1] + nn[1] * t], u0 < 0.5 ? C[i] : [A[0] + nn[0] * t, A[1] + nn[1] * t]];
+    };
+    paredes.push({ i, rets: rets.map(r => ({ quad: quad(r[0], r[1]), y0: r[2], y1: r[3] })), origem: origemParede(e.walls[i]) });
+    for (const x of livres) if (x.o.tipo === 'janela') vidros.push({ i, n: nn, a: [P[i][0] + d[0] * x.u0 + nn[0] * t / 2, P[i][1] + d[1] * x.u0 + nn[1] * t / 2], b: [P[i][0] + d[0] * x.u1 + nn[0] * t / 2, P[i][1] + d[1] * x.u1 + nn[1] * t / 2], y0: x.v0, y1: x.v1 });
+  }
+  const piso = fechado ? P.slice(0, n) : null;
+  const pts = [...P, ...C]; const cx = (Math.min(...pts.map(p => p[0])) + Math.max(...pts.map(p => p[0]))) / 2, cz = (Math.min(...pts.map(p => p[1])) + Math.max(...pts.map(p => p[1]))) / 2;
+  const ext = Math.max(Math.max(...pts.map(p => p[0])) - Math.min(...pts.map(p => p[0])), Math.max(...pts.map(p => p[1])) - Math.min(...pts.map(p => p[1])), H);
+  return { paredes, vidros, piso, H, t, cx, cz, ext, P, len, n, fechado, fechamento: folga };
+}
+function etiqueta3D(T, txt, cor) {
+  const c = document.createElement('canvas'); c.width = 384; c.height = 96; const x = c.getContext('2d');
+  x.fillStyle = 'rgba(255,253,249,.95)'; x.strokeStyle = cor; x.lineWidth = 6; const r = 18;
+  x.beginPath(); x.moveTo(r, 4); x.arcTo(380, 4, 380, 92, r); x.arcTo(380, 92, 4, 92, r); x.arcTo(4, 92, 4, 4, r); x.arcTo(4, 4, 380, 4, r); x.closePath(); x.fill(); x.stroke();
+  x.fillStyle = '#1d1b18'; x.font = 'bold 44px ui-monospace,Menlo,Consolas,monospace'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(txt, 192, 50);
+  const tex = new T.THREE.CanvasTexture(c), sp = new T.THREE.Sprite(new T.THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.scale.set(0.96, 0.24, 1); sp.renderOrder = 10; return sp;
+}
+// Constrói os objetos three.js a partir da geometria. Devolve { modelo (para exportar), cotas (rótulos), meshes (paredes, por índice) }.
+function construir3D(T, gm, e) {
+  const THREE = T.THREE, m = 0.001, ox = gm.cx, oz = gm.cz;
+  const V = (p, y) => new THREE.Vector3((p[0] - ox) * m, y * m, (p[1] - oz) * m);
+  const modelo = new THREE.Group(); modelo.name = 'Ambiente'; const cotas = new THREE.Group(), meshes = [];
+  for (const w of gm.paredes) {
+    const pos = [];
+    for (const r of w.rets) {
+      const ring = r.quad, cen = new THREE.Vector3(); const b = ring.map(p => V(p, r.y0)), t = ring.map(p => V(p, r.y1)); [...b, ...t].forEach(v => cen.add(v)); cen.multiplyScalar(1 / 8);
+      const tri = (a, bb, c) => { const nrm = new THREE.Vector3().subVectors(bb, a).cross(new THREE.Vector3().subVectors(c, a)), mid = new THREE.Vector3().add(a).add(bb).add(c).multiplyScalar(1 / 3); if (nrm.dot(mid.sub(cen)) < 0) [bb, c] = [c, bb]; pos.push(a.x, a.y, a.z, bb.x, bb.y, bb.z, c.x, c.y, c.z); };
+      const face = (a, bb, c, d) => { tri(a, bb, c); tri(a, c, d); };
+      face(b[0], b[1], b[2], b[3]); face(t[0], t[1], t[2], t[3]);
+      for (let k = 0; k < 4; k++) face(b[k], b[(k + 1) % 4], t[(k + 1) % 4], t[k]);
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ color: COR_ORIGEM[w.origem], roughness: 0.9, metalness: 0 });
+    const mesh = new THREE.Mesh(geo, mat); mesh.name = 'Parede ' + (w.i + 1) + ' (' + NOME_ORIGEM[w.origem] + ')'; mesh.userData.parede = w.i; modelo.add(mesh); meshes[w.i] = mesh;
+    // cota da parede: medida e origem, acima do topo, no meio
+    const a = gm.P[w.i], b2 = gm.P[w.i + 1], mid = [(a[0] + b2[0]) / 2, (a[1] + b2[1]) / 2], L = gm.len[w.i];
+    const sp = etiqueta3D(T, fL(e.walls[w.i].mm != null ? e.walls[w.i].mm : L) + ' ' + CHAR_ORIGEM[w.origem], '#' + COR_ORIGEM[w.origem].toString(16).padStart(6, '0'));
+    const p3 = V(mid, gm.H + 260); sp.position.copy(p3); sp.userData.parede = w.i; cotas.add(sp);
+  }
+  if (gm.piso) {
+    const shape = new THREE.Shape(gm.piso.map(p => new THREE.Vector2((p[0] - ox) * m, -(p[1] - oz) * m)));
+    const geo = new THREE.ShapeGeometry(shape); geo.rotateX(-Math.PI / 2);
+    const piso = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xefe6d8, roughness: 1 })); piso.name = 'Piso'; modelo.add(piso);
+  }
+  for (const v of gm.vidros) { // vidro: duas faces finas (frente e verso), sem material de dupla face (o USDZ não suporta)
+    const n3 = new THREE.Vector3(v.n[0], 0, v.n[1]);
+    for (const [sg, nome] of [[1, 'Vidro'], [-1, 'Vidro (verso)']]) {
+      const off = n3.clone().multiplyScalar(sg * 0.002), A = V(v.a, v.y0).add(off), B = V(v.b, v.y0).add(off), C = V(v.b, v.y1).add(off), D = V(v.a, v.y1).add(off);
+      const nrm = new THREE.Vector3().subVectors(B, A).cross(new THREE.Vector3().subVectors(C, A)); // normal do primeiro triângulo
+      const q = nrm.dot(n3) * sg > 0 ? [A, B, C, A, C, D] : [A, C, B, A, D, C];
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(q.flatMap(p => [p.x, p.y, p.z]), 3)); geo.computeVertexNormals();
+      const vid = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x9fd3ff, roughness: 0.1, transparent: true, opacity: 0.35 })); vid.name = nome; modelo.add(vid);
+    }
+  }
+  return { modelo, cotas, meshes };
+}
+function liberar3D(grupo) { grupo.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); }
+function parar3D() {
+  if (!V3) return; cancelAnimationFrame(V3.raf); V3.ro?.disconnect(); V3.controls?.dispose();
+  if (V3.obj) { liberar3D(V3.obj.modelo); liberar3D(V3.obj.cotas); }
+  V3.renderer?.dispose(); V3.renderer?.forceContextLoss?.(); V3 = null;
+}
+const nomeArq3D = (e, ext) => `${proj().nome}_${e.nome}.${ext}`;
+async function exportarModelo3D(tipo) {
+  const T = await carregar3D(), v = V3; if (!v) return;
+  const sel = v.sel; v.marcar(null);
+  try {
+    if (tipo === 'usdz') {
+      const buf = await new T.USDZExporter().parse(v.obj.modelo, { quickLookCompatible: true });
+      return new Blob([buf], { type: 'model/vnd.usdz+zip' });
+    }
+    const buf = await new Promise((ok, err) => new T.GLTFExporter().parse(v.obj.modelo, ok, err, { binary: true }));
+    return new Blob([buf], { type: 'model/gltf-binary' });
+  } finally { v.marcar(sel); }
+}
+// AR Quick Look (iPhone): link rel="ar" para o arquivo USDZ, em escala real.
+async function verEmAR() {
+  const e = V3.e, blob = await exportarModelo3D('usdz');
+  const a = document.createElement('a'); a.rel = 'ar'; a.href = URL.createObjectURL(blob); a.download = nomeArq3D(e, 'usdz').replace(/[\\/:*?"<>|]/g, '_');
+  a.appendChild(document.createElement('img')); document.body.appendChild(a); a.click(); setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 15000);
+}
+async function v3D() {
+  const a = area(), e = a.esbocos.find(x => x.id === rota.e) || a.esbocos[0];
+  if (!e) { app.innerHTML = `<div class="card vazio">${ic('cubo')}<b>Sem esboço para mostrar em 3D</b>Desenhe a planta e meça as paredes.</div>`; return; }
+  const esp = S.cfg.espessura || 100;
+  app.innerHTML = `<div class="ftool"><button class="small btn2" id="t3Cima">${ic('ajustar')} De cima</button><button class="small btn2" id="t3Persp">${ic('cubo')} Perspectiva</button><button class="small btn2 on" id="t3Cotas">Cotas</button><span style="flex:1"></span>
+    <button class="small btn2" id="t3Fit" aria-label="Enquadrar">${ic('ajustar')}</button></div>
+   <div class="board3d" id="c3d"><div class="leg3d"><span style="color:#2f7f75">✓ laser</span><span style="color:#a77a1c">✎ digitada</span><span style="color:#857c6f">≈ estimada</span><span style="color:#3f6fd0">◎ scan</span></div><div class="muted c3msg" id="c3msg">Carregando o 3D…</div></div>
+   <div class="card" id="p3d"><div class="row"><div><label>Pé-direito (mm)</label><input id="t3H" inputmode="decimal" value="${e.altura != null ? Math.round(e.altura) : ''}" placeholder="2700"></div><div><label>Espessura da parede (mm)</label><input id="t3E" inputmode="decimal" value="${esp}"></div></div>
+    <label id="t3Lbl">Parede selecionada</label><input id="m3d" inputmode="decimal" placeholder="Toque numa parede e meça com o laser">
+    <p class="muted" id="t3Dica" style="margin:6px 0 0"></p>
+    <div class="row" style="margin-top:12px;flex-wrap:wrap">${ehIOS() ? '<button id="t3Ar" style="flex:1 1 100%">Ver em AR no iPhone</button>' : ''}<button class="btn2" id="t3Usdz">Baixar USDZ</button><button class="btn2" id="t3Glb">Baixar GLB</button></div>
+    <p class="muted">O AR usa o visualizador do iPhone, em escala real. Se não abrir aqui, baixe o USDZ e abra pelo app Arquivos. A planta vem do esboço medido.</p></div>`;
+  let T; try { T = await carregar3D(); } catch (err) { document.getElementById('c3msg').innerHTML = 'Não foi possível carregar o 3D. Na primeira vez é preciso internet; depois ele funciona sem sinal.<br><small>' + esc(txtErro(err)) + '</small>'; return; }
+  if (rota.v !== '3d') return;
+  parar3D();
+  const THREE = T.THREE, cont = document.getElementById('c3d'); document.getElementById('c3msg')?.remove();
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1)); renderer.setClearColor(0xf3efe7);
+  cont.appendChild(renderer.domElement); renderer.domElement.style.cssText = 'width:100%;height:100%;display:block;touch-action:none';
+  const scene = new THREE.Scene(); scene.add(new THREE.HemisphereLight(0xffffff, 0xb9aea0, 1.05)); const sol = new THREE.DirectionalLight(0xffffff, 1.1); sol.position.set(3, 6, 4); scene.add(sol);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 200), controls = new T.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.12; controls.screenSpacePanning = true; controls.maxPolarAngle = Math.PI / 2;
+  V3 = { e, renderer, scene, camera, controls, obj: null, sel: null, cotas: true, raf: 0, gm: null };
+  const sel3 = { i: null }; V3.sel = null;
+  const encaixar = (modo) => {
+    const gm = V3.gm; if (!gm) return; const m = 0.001, d = Math.max(2.5, gm.ext * m * 1.7), alvoY = gm.H * m / 2;
+    controls.target.set(0, alvoY, 0);
+    if (modo === 'cima') camera.position.set(0, d * 1.9, 0.0001); else camera.position.set(d * 0.75, d * 0.8, d * 0.95);
+    camera.lookAt(controls.target); controls.update();
+  };
+  const montar = () => {
+    if (V3.obj) { scene.remove(V3.obj.modelo); scene.remove(V3.obj.cotas); liberar3D(V3.obj.modelo); liberar3D(V3.obj.cotas); }
+    V3.gm = geometria3D(e, S.cfg.espessura || 100); if (!V3.gm) return;
+    V3.obj = construir3D(T, V3.gm, e); scene.add(V3.obj.modelo); scene.add(V3.obj.cotas); V3.obj.cotas.visible = V3.cotas; V3.marcar(V3.sel);
+    V3.paredes3d = V3.obj.meshes.filter(Boolean);
+    const info = V3.gm.fechado ? `Planta fechada: folga de fechamento de ${Math.round(V3.gm.fechamento)} mm distribuída no desenho.` : 'Planta aberta: sem piso.';
+    document.getElementById('t3Dica').textContent = info + ' Paredes sem medida usam o tamanho desenhado (≈).';
+  };
+  V3.marcar = i => { V3.sel = i; (V3.obj?.meshes || []).forEach((mm, k) => { if (mm) mm.material.emissive.setHex(k === i ? 0x5a2a00 : 0x000000); }); };
+  const nx = () => e.walls.findIndex(w => w.mm == null);
+  const selecionarParede = i => {
+    V3.marcar(i); const inp = document.getElementById('m3d'); alvo = null; if (i == null) { inp.value = ''; document.getElementById('t3Lbl').textContent = 'Parede selecionada'; return; }
+    const w = e.walls[i]; inp.value = w.mm != null ? Math.round(w.mm) : ''; inp.placeholder = 'meça com o laser'; document.getElementById('t3Lbl').innerHTML = `Parede ${i + 1} · <span class="${ORIG[w.o]?.[1] || ''}">${w.mm != null ? oTag(w.o) : '≈ estimada'}</span>`;
+    inp.classList.add('alvo');
+    alvo = { inp, aplicar: val => { // medida da trena (ou do chip): grava na parede e o 3D muda na hora
+      w.mm = Math.round(val); w.o = 'laser'; inp.value = w.mm; tocar(); montar(); toast(`Parede ${i + 1}: ${fmm(w.mm)} ✓`, 1500);
+      setTimeout(() => { if (rota.v === '3d' && V3) { const prox = e.walls.findIndex((x, j) => j > i && x.mm == null); selecionarParede(prox >= 0 ? prox : i); } }, 700);
+    } };
+  };
+  V3.selecionarParede = selecionarParede;
+  const inp = document.getElementById('m3d');
+  inp.onchange = () => { const i = V3.sel; if (i == null) return; const v = parseFloat(inp.value.replace(',', '.')); const w = e.walls[i]; if (isNaN(v)) { w.mm = null; w.o = null; } else { w.mm = Math.round(v); w.o = 'manual'; } tocar(); montar(); selecionarParede(i); };
+  document.getElementById('t3H').onchange = ev => { const v = parseFloat(ev.target.value.replace(',', '.')); if (!isNaN(v) && v > 500) { e.altura = Math.round(v); e.alturaO = 'manual'; tocar(); montar(); } else ev.target.value = e.altura != null ? Math.round(e.altura) : ''; };
+  document.getElementById('t3E').onchange = ev => { const v = parseFloat(ev.target.value.replace(',', '.')); if (!isNaN(v) && v >= 20 && v <= 500) { S.cfg.espessura = Math.round(v); salvar(); montar(); } else ev.target.value = S.cfg.espessura || 100; };
+  document.getElementById('t3Cima').onclick = () => encaixar('cima'); document.getElementById('t3Persp').onclick = () => encaixar('persp'); document.getElementById('t3Fit').onclick = () => encaixar('persp');
+  document.getElementById('t3Cotas').onclick = ev => { V3.cotas = !V3.cotas; ev.currentTarget.classList.toggle('on', V3.cotas); if (V3.obj) V3.obj.cotas.visible = V3.cotas; };
+  const baixarBlob = async tipo => { try { const blob = await exportarModelo3D(tipo); baixar(nomeArq3D(e, tipo), blob, blob.type); } catch (err) { aviso('Não foi possível exportar', esc(txtErro(err))); } };
+  document.getElementById('t3Usdz').onclick = () => baixarBlob('usdz'); document.getElementById('t3Glb').onclick = () => baixarBlob('glb');
+  document.getElementById('t3Ar')?.addEventListener('click', () => verEmAR().catch(err => aviso('Não foi possível abrir o AR', esc(txtErro(err)))));
+  // toque numa parede = alvo da próxima medida do laser (distingue de arrastar/girar)
+  const dom = renderer.domElement, ray = new THREE.Raycaster(); let down = null;
+  dom.addEventListener('pointerdown', ev => { down = { x: ev.clientX, y: ev.clientY, t: performance.now() }; });
+  dom.addEventListener('pointerup', ev => {
+    if (!down || Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 8 || performance.now() - down.t > 500) { down = null; return; } down = null;
+    const r = dom.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1), camera);
+    const hit = ray.intersectObjects(V3.paredes3d || [], false)[0]; selecionarParede(hit ? hit.object.userData.parede : null);
+  });
+  const dimensionar = () => { const w = cont.clientWidth, h = cont.clientHeight; if (!w || !h) return; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
+  V3.ro = new ResizeObserver(dimensionar); V3.ro.observe(cont); dimensionar();
+  montar(); encaixar('persp');
+  const i0 = nx(); if (i0 >= 0) selecionarParede(i0);
+  const laco = () => { if (!V3 || rota.v !== '3d') return; V3.raf = requestAnimationFrame(laco); controls.update(); renderer.render(scene, camera); V3.quadros = (V3.quadros || 0) + 1; };
+  laco();
+}
+// Ponto de entrada da leitura do scan do app nativo (formato nycxo-scan v1; leitor em importar-scan.js).
+async function importarScanArquivo(a, f) {
+  let json; try { json = JSON.parse(await f.text()); } catch (err) { return aviso('Arquivo inválido', 'Não é um JSON de scan.'); }
+  let r; try { r = NycxoScan.importarScan(json, { uid }); } catch (err) { return aviso('Scan não importado', esc(err.message)); }
+  const dg = r.diagnostico;
+  a.esbocos.push(r.esboco);
+  if (r.objetos.length) { // objetos do scan (móveis e equipamentos): viram uma nota, sem perder os dados brutos
+    const NOME = { storage: 'armário', refrigerator: 'geladeira', stove: 'fogão', bed: 'cama', sink: 'pia', washerDryer: 'máquina de lavar', toilet: 'vaso', bathtub: 'banheira', oven: 'forno', dishwasher: 'lava-louças', table: 'mesa', sofa: 'sofá', chair: 'cadeira', fireplace: 'lareira', television: 'TV', stairs: 'escada' };
+    const linhas = r.objetos.map(o => `${NOME[o.categoria] || o.categoria}: ${fN(o.dimensoes_mm.largura)} × ${fN(o.dimensoes_mm.profundidade)} × ${fN(o.dimensoes_mm.altura)} ${UN[S.cfg.unid][1]}`);
+    a.notas.push({ id: uid(), texto: 'Objetos do scan (referência de layout, não é medida de projeto):\n' + linhas.join('\n'), pos: null });
+  }
+  const id = uid(); await DB.put('fotos', id, f); a.scans.push({ id, nome: f.name, tipo: 'application/json', tam: f.size, pos: null, origem: 'lidar' }); // dados brutos preservados
+  posicionarItens(a); tocar(); render();
+  aviso('Scan importado', `<b>${esc(r.esboco.nome)}</b>: ${r.esboco.walls.length} paredes, ${r.esboco.aberturas.length} abertura(s)` + (r.objetos.length ? `, ${r.objetos.length} objeto(s) em nota` : '') + `.<br>Fechamento: ${Math.round(dg.fechamento_mm)} mm · área ${m2(dg.area_mm2)}.` + (dg.avisos.length ? '<br><br><b>Avisos</b><br>' + dg.avisos.map(esc).join('<br>') : '') + '<br><br>Medidas do scan são de referência: confira com o laser antes de cortar.');
+}
+
 /* ===================== Sobre ===================== */
 const COMPILADO = '2026-10-28';
 async function vSobre() {
@@ -1961,7 +2195,7 @@ async function vSobre() {
 const CFG_PADRAO = {
   unid: 'mm', dec: 0, empresa: '', logo: null, usarLogo: true,
   pdf: { cliente: true, planta: true, info: true, paredes: true, fotos: true, notas: true, leituras: false },
-  fotosPag: 2, qualidade: 'media', porta: { larg: 900, alt: 2110 }, janela: { larg: 1000, alt: 1000, peit: 1000 }
+  fotosPag: 2, qualidade: 'media', espessura: 100, porta: { larg: 900, alt: 2110 }, janela: { larg: 1000, alt: 1000, peit: 1000 }
 };
 function normalizarCfg() {
   const c = S.cfg || {};
@@ -2259,7 +2493,7 @@ async function gerarPDF(p, soArea) {
   const c = S.cfg, { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   const PW = 210, PH = 297, M = 14, CW = PW - 2 * M, T = san;
   const Q = { baixa: [1200, 0.6], media: [1800, 0.75], alta: [2600, 0.88] }[c.qualidade] || [1800, 0.75];
-  const ORIG_TXT = { laser: 'laser', manual: 'digitada', importada: 'importada' };
+  const ORIG_TXT = { laser: 'laser', manual: 'digitada', importada: 'importada', lidar: 'scan LiDAR' };
   let y = 0, pag = 0;
   const cor = (r, g, b) => doc.setTextColor(r, g, b);
   const cab = () => {
