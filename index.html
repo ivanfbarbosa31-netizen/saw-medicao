@@ -1252,7 +1252,17 @@ function focarAlvo(inp, aplicar) {
 const SVC = '02a6c0d0-0451-4000-b000-fb3210111989', CHR = '02a6c0d1-0451-4000-b000-fb3210111989';
 const L = { dev: null, ch: null, log: [], recentes: [], info: null };
 // Servicos extras so para o Diagnostico enxergar o que o aparelho tem (Web Bluetooth so mostra o que for listado aqui).
-const OPC = [SVC, 'generic_access', 'device_information', 'battery_service', '6e400001-b5a3-f393-e0a9-e50e24dcca9e', 0xFFE0, 0xFFF0];
+// So UUIDs de 128 bits completos e em minusculas (alias/numeros curtos podem ser recusados por alguns navegadores).
+const OPC = [SVC, '00001800-0000-1000-8000-00805f9b34fb', '0000180a-0000-1000-8000-00805f9b34fb', '0000180f-0000-1000-8000-00805f9b34fb', '6e400001-b5a3-f393-e0a9-e50e24dcca9e', '0000ffe0-0000-1000-8000-00805f9b34fb', '0000fff0-0000-1000-8000-00805f9b34fb'];
+// Texto de qualquer coisa lancada (Error, string, objeto sem name/message).
+function txtErro(e) {
+  let j = ''; try { j = JSON.stringify(e); } catch (x) { }
+  const base = [e && e.name, e && e.message].filter(Boolean).join(': ');
+  if (base) return base;
+  if (typeof e === 'string' && e) return e;
+  if (j && j !== '{}') return j;
+  return String(e) + ' (erro sem detalhes do navegador)';
+}
 const NOMES_TRENA = ['GLM', 'PLR', 'Bosch', 'BOSCH', 'GLM50C']; // prefixo diferencia maiusculas; "GLM50C" ja cai em "GLM", fica explicito
 const soTrenas = () => { try { return localStorage.getItem('nycxo-medida-so-trenas') === '1'; } catch (e) { return false; } };
 function setLaser(on, txt) { document.getElementById('ldot').classList.toggle('on', on); document.getElementById('lst').textContent = txt; document.getElementById('lbtn').textContent = on ? 'Desligar' : 'Conectar'; }
@@ -1262,19 +1272,36 @@ document.getElementById('lbtn').onclick = async () => {
   if (!navigator.bluetooth) {
     return aviso('Bluetooth indisponível neste navegador', `O Safari do iPhone não libera Bluetooth para sites. No iPhone, abra este endereço no app <b>Bluefy</b> (grátis na App Store). No computador ou Android use o <b>Chrome</b>.<br><br>Antes, desconecte o laser de qualquer outro app — ele só conversa com um aparelho por vez.`);
   }
+  L.erro1 = null;
   try {
     // A trena nao anuncia o servico no advertising (so aparece depois de conectar): filtrar por services deixa a lista vazia.
     // Padrao: lista todos os aparelhos. Opcao do menu: so nomes de trena.
     const opt = soTrenas() ? { filters: NOMES_TRENA.map(namePrefix => ({ namePrefix })), optionalServices: OPC }
                            : { acceptAllDevices: true, optionalServices: OPC };
-    L.dev = await navigator.bluetooth.requestDevice(opt);
+    try { L.dev = await navigator.bluetooth.requestDevice(opt); }
+    catch (e1) {
+      if (e1 && e1.name === 'NotFoundError') throw e1;
+      // Fallback: alguns navegadores recusam a lista grande de servicos. Tenta o modo simples.
+      L.erro1 = txtErro(e1);
+      try { L.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] }); }
+      catch (e2) { throw e2; }
+    }
     L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)', servicos: null, erro: null };
     L.dev.addEventListener('gattserverdisconnected', aoDesconectar);
     await conectarGatt();
   } catch (e) {
     setLaser(false, 'Laser off');
-    if (e.name === 'NotFoundError') toast('Nenhum aparelho escolhido. Se a lista veio vazia: ligue o Bluetooth da trena, feche o app oficial dela e tente "Procurar só trenas" no menu.', 7000);
-    else aviso('Não conectou', esc(e.name + ': ' + e.message));
+    if (e && e.name === 'NotFoundError') toast('Nenhum aparelho escolhido. Se a lista veio vazia: ligue o Bluetooth da trena, feche o app oficial dela e tente "Procurar só trenas" no menu.', 7000);
+    else {
+      aviso('Não conectou', esc(txtErro(e)) + (L.erro1 ? '<br><br>Primeira tentativa: ' + esc(L.erro1) : '') + '<br><br><button class="btn2" id="aSimples">Tentar de novo (modo simples)</button>');
+      document.getElementById('aSimples').onclick = async () => {
+        document.getElementById('dlg').close();
+        try { L.erro1 = null; L.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] });
+          L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)', servicos: null, erro: null };
+          L.dev.addEventListener('gattserverdisconnected', aoDesconectar); await conectarGatt();
+        } catch (e3) { setLaser(false, 'Laser off'); if (e3 && e3.name === 'NotFoundError') toast('Nenhum aparelho escolhido.', 5000); else aviso('Não conectou', esc(txtErro(e3))); }
+      };
+    }
   }
 };
 async function conectarGatt() {
@@ -1282,10 +1309,10 @@ async function conectarGatt() {
   const srv = await L.dev.gatt.connect();
   if (!L.info) L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)' };
   L.info.servicos = null; L.info.erro = null;
-  try { L.info.servicos = (await srv.getPrimaryServices()).map(x => x.uuid); } catch (e) { L.info.servicos = 'não foi possível listar: ' + e.name + ': ' + e.message; }
+  try { L.info.servicos = (await srv.getPrimaryServices()).map(x => x.uuid); } catch (e) { L.info.servicos = 'não foi possível listar: ' + txtErro(e); }
   try { L.ch = await (await srv.getPrimaryService(SVC)).getCharacteristic(CHR); }
   catch (e) {
-    L.info.erro = e.name + ': ' + e.message;
+    L.info.erro = txtErro(e);
     L.manual = true; try { L.dev.gatt.disconnect(); } catch (x) { }
     throw new Error('Este aparelho (' + L.info.nome + ') não tem o serviço de medida esperado (' + L.info.erro + '). Veja o Diagnóstico no menu: ele mostra os serviços que o aparelho oferece. Pode ser outro modelo de trena.');
   }
