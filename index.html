@@ -165,9 +165,150 @@ const DB = (() => {
   };
 })();
 
-let S = { projetos: [], leiturasSoltas: [] };
-const salvar = () => DB.put('kv', 'estado', S);
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+let S = { projetos: [], leiturasSoltas: [], lixeira: [], excluidos: [], bkp: { ultimo: null, n: 0, desde: null }, schema: 2 };
+/* ===================== Modelo de dados (pronto para sincronizar) ===================== */
+// Cada projeto, área, item, valor e leitura tem: id (UUID estável), criado_em, alterado_em e excluido_em (ms).
+// Estrutura: projeto > área > item (esboço, foto, nota, scan) > valor (parede, abertura, seta, altura) + leitura do laser.
+// Origem da medida: laser | manual (digitada) | importada | nula (estimada). Projeto tem o campo opcional pv.
+const ESQUEMA = 2, VERSAO_APP = '0.7';
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function hash128(str) {
+  let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
+  for (let i = 0, k; i < str.length; i++) { k = str.charCodeAt(i); h1 = h2 ^ Math.imul(h1 ^ k, 597399067); h2 = h3 ^ Math.imul(h2 ^ k, 2869860233); h3 = h4 ^ Math.imul(h3 ^ k, 951274213); h4 = h1 ^ Math.imul(h4 ^ k, 2716044179); }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067); h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233); h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213); h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  return [(h1 ^ h2 ^ h3 ^ h4) >>> 0, (h2 ^ h1) >>> 0, (h3 ^ h1) >>> 0, (h4 ^ h1) >>> 0];
+}
+// UUID derivado do texto: o mesmo id antigo gera sempre o mesmo UUID, em qualquer aparelho (migração repetível).
+function uuidDet(txt) {
+  const x = hash128('nycxo-medida:' + txt).map(n => n.toString(16).padStart(8, '0')).join('');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-5${x.slice(13, 16)}-${((parseInt(x[16], 16) & 3) | 8).toString(16)}${x.slice(17, 20)}-${x.slice(20, 32)}`;
+}
+const uid = () => {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+  const x = [...b].map(n => n.toString(16).padStart(2, '0')).join('');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
+};
+// Percorre o projeto: fn(tipo, objeto, pai)
+function percorrer(p, fn) {
+  if (p.areas) { fn('projeto', p, null); p.areas.forEach(a => percorrerArea(a, p, fn)); }
+}
+function percorrerArea(a, p, fn) {
+  fn('area', a, p);
+  for (const e of a.esbocos || []) { fn('esboco', e, a); (e.walls || []).forEach(w => fn('parede', w, e)); (e.aberturas || []).forEach(o => fn('abertura', o, e)); }
+  for (const f of a.fotos || []) { fn('foto', f, a); (f.setas || []).forEach(s => fn('seta', s, f)); }
+  (a.notas || []).forEach(n => fn('nota', n, a)); (a.scans || []).forEach(s => fn('scan', s, a)); (a.leituras || []).forEach(l => fn('leitura', l, a));
+}
+// Troca ids curtos antigos por UUID (derivado, estável). Cobre ids de objetos e a chave do fundo (fundo.img).
+function uuidizar(raiz) {
+  const ids = new Set();
+  const colher = o => {
+    if (Array.isArray(o)) o.forEach(colher);
+    else if (o && typeof o === 'object') {
+      if (typeof o.id === 'string' && o.id && !RE_UUID.test(o.id)) ids.add(o.id);
+      if (o.fundo && typeof o.fundo.img === 'string' && !RE_UUID.test(o.fundo.img)) ids.add(o.fundo.img);
+      for (const v of Object.values(o)) if (v && typeof v === 'object') colher(v);
+    }
+  };
+  colher(raiz);
+  const mapa = new Map([...ids].map(i => [i, uuidDet(i)]));
+  if (!mapa.size) return mapa;
+  const SEM = new Set(['nome', 'texto', 't', 'grupo', 'logo', 'empresa']);
+  const troca = o => {
+    if (Array.isArray(o)) { for (let i = 0; i < o.length; i++) { const v = o[i]; if (typeof v === 'string') { if (mapa.has(v)) o[i] = mapa.get(v); } else if (v && typeof v === 'object') troca(v); } }
+    else if (o && typeof o === 'object') for (const k of Object.keys(o)) { const v = o[k]; if (typeof v === 'string') { if (!SEM.has(k) && mapa.has(v)) o[k] = mapa.get(v); } else if (v && typeof v === 'object') troca(v); }
+  };
+  troca(raiz);
+  return mapa;
+}
+const TIPO_CRIADO = { projeto: 'criado', area: 'data', leitura: 'ts' };
+// Garante id e carimbos de uma entidade. det=true: valores derivados dos dados (migração repetível); senão, agora.
+function completar(tipo, o, pai, p, det, idx, agora) {
+  if (!o.id) o.id = det ? uuidDet((pai?.id || 'raiz') + '|' + tipo + '|' + idx) : uid();
+  if (!o.criado_em) o.criado_em = (o[TIPO_CRIADO[tipo]] || o.ts || pai?.criado_em || p?.criado || (det ? 0 : agora)) || agora;
+  if (!o.alterado_em) o.alterado_em = (tipo === 'projeto' ? o.alt : null) || (det ? (pai?.alterado_em || p?.alt || o.criado_em) : agora);
+  if (o.excluido_em === undefined) o.excluido_em = null;
+  if (tipo === 'projeto' && o.pv === undefined) o.pv = null;
+}
+function completarProjeto(p, det, agora = Date.now()) {
+  const cont = new Map();
+  percorrer(p, (tipo, o, pai) => { const k = (pai?.id || '') + tipo; const i = cont.get(k) || 0; cont.set(k, i + 1); completar(tipo, o, pai, p, det, i, agora); });
+}
+// Migra um projeto de qualquer versão para o esquema atual; devolve o mapa id antigo -> UUID (usado nas fotos).
+function migrarProjeto(p) {
+  p.areas ??= []; p.cliente ??= {};
+  const mapa = uuidizar(p);
+  p.areas.forEach(migrarArea);
+  completarProjeto(p, true);
+  return mapa;
+}
+// Detecção de mudança: impressão digital de cada entidade (somente em memória) para carimbar alterado_em.
+const FP = new Map(), TIPOS = new Map();
+const HASH_EXCL = new Set(['areas', 'esbocos', 'fotos', 'notas', 'scans', 'leituras', 'alterado_em']);
+// 'alt' do projeto (último acesso) não conta como mudança; 'alt' de abertura (altura) conta.
+const hashDe = o => JSON.stringify(o, function (k, v) { return HASH_EXCL.has(k) || (k === 'alt' && Array.isArray(this.areas)) ? undefined : v; });
+function carimbar(estado, semTumulo) {
+  const agora = Date.now(), vistos = new Set(), cont = new Map();
+  const proc = (tipo, o, pai, p) => {
+    const k = (pai?.id || '') + tipo; const i = cont.get(k) || 0; cont.set(k, i + 1);
+    completar(tipo, o, pai, p, false, i, agora);
+    const h = hashDe(o), ant = FP.get(o.id);
+    if (ant !== undefined && ant !== h) o.alterado_em = agora;
+    FP.set(o.id, h); TIPOS.set(o.id, tipo); vistos.add(o.id);
+  };
+  const projetos = [...estado.projetos, ...(estado.lixeira || []).filter(x => x.tipo === 'projeto').map(x => x.dado)];
+  for (const p of projetos) {
+    percorrer(p, (tipo, o, pai) => proc(tipo, o, pai, p));
+    for (const a of p.areas) { for (const e of [...a.esbocos, ...a.fotos, ...a.notas, ...(a.scans || []), ...a.leituras]) a.alterado_em = Math.max(a.alterado_em, e.alterado_em || 0); p.alterado_em = Math.max(p.alterado_em, a.alterado_em); }
+    p.alterado_em = Math.max(p.alterado_em, p.alt || 0);
+  }
+  for (const x of (estado.lixeira || []).filter(x => x.tipo === 'area')) {
+    const pseudo = { id: x.projetoId, areas: [x.dado] };
+    percorrerArea(x.dado, pseudo, (tipo, o, pai) => proc(tipo, o, pai, pseudo));
+  }
+  for (const l of estado.leiturasSoltas) proc('leitura', l, null, null);
+  if (!semTumulo) {
+    estado.excluidos ??= [];
+    for (const id of [...FP.keys()]) if (!vistos.has(id)) { estado.excluidos.push({ id, tipo: TIPOS.get(id), excluido_em: agora }); FP.delete(id); TIPOS.delete(id); }
+    if (estado.excluidos.length > 5000) estado.excluidos.splice(0, estado.excluidos.length - 5000);
+  } else for (const id of [...FP.keys()]) if (!vistos.has(id)) { FP.delete(id); TIPOS.delete(id); }
+}
+function reiniciarFP() { FP.clear(); TIPOS.clear(); carimbar(S, true); }
+const salvar = () => { carimbar(S); registrarAlteracao(); return DB.put('kv', 'estado', S); };
+function registrarAlteracao() { S.bkp ??= { ultimo: null, n: 0, desde: null }; S.bkp.n++; S.bkp.desde ??= Date.now(); agendarSnap(); }
+function agendarSnap() { }
+
+// ---- Tabelas planas no formato de sincronização (medicao_*), geradas a partir do aninhado ----
+const iso = ms => ms == null ? null : new Date(ms).toISOString();
+const ORIGEM_TAB = { laser: 'laser', manual: 'digitada', importada: 'importada' };
+const origemTab = o => ORIGEM_TAB[o] || 'estimada';
+function paraTabelas(projetos, leiturasSoltas = []) {
+  const T = { medicao_projeto: [], medicao_area: [], medicao_item: [], medicao_valor: [], medicao_leitura_laser: [] };
+  const car = o => ({ criado_em: iso(o.criado_em), alterado_em: iso(o.alterado_em), excluido_em: iso(o.excluido_em) });
+  const val = (id, item_id, referencia, mm, o, base) => T.medicao_valor.push({ id, item_id, referencia, valor_mm: mm == null ? null : Math.round(mm * 100) / 100, origem: origemTab(o), ...car(base) });
+  for (const p of projetos) {
+    T.medicao_projeto.push({ id: p.id, numero_pv: p.pv ?? null, nome: p.nome, cliente: p.cliente || {}, ...car(p) });
+    for (const a of p.areas) {
+      T.medicao_area.push({ id: a.id, projeto_id: p.id, nome: a.nome, ...car(a) });
+      for (const e of a.esbocos) {
+        const g = esbGeo(e);
+        T.medicao_item.push({ id: e.id, area_id: a.id, tipo: 'esboco', nome: e.nome, arquivo: null, dados: e, ...car(e) });
+        e.walls.forEach((w, i) => val(w.id, e.id, 'parede:' + (i + 1), w.mm != null ? w.mm : g.len[i], w.mm != null ? w.o : null, w));
+        if (e.altura != null) val(uuidDet(e.id + '#altura'), e.id, 'altura', e.altura, e.alturaO, e);
+        e.aberturas.forEach((o, i) => { for (const c of ['larg', 'alt', 'peit']) if (o[c] != null) val(uuidDet(o.id + '#' + c), e.id, `abertura:${o.tipo}:${i + 1}:${c}`, +o[c], 'manual', o); });
+      }
+      for (const f of a.fotos) {
+        T.medicao_item.push({ id: f.id, area_id: a.id, tipo: 'foto', nome: f.nome || null, arquivo: f.id, dados: f, ...car(f) });
+        (f.setas || []).forEach((s, i) => { if (s.mm != null) val(s.id, f.id, 'seta:' + (i + 1), s.mm, s.o, s); });
+      }
+      for (const n of a.notas) T.medicao_item.push({ id: n.id, area_id: a.id, tipo: 'nota', nome: null, arquivo: null, dados: n, ...car(n) });
+      for (const s of a.scans || []) T.medicao_item.push({ id: s.id, area_id: a.id, tipo: 'scan_ar', nome: s.nome || null, arquivo: s.id, dados: s, ...car(s) });
+      for (const l of a.leituras) T.medicao_leitura_laser.push({ id: l.id, area_id: a.id, grupo: l.grupo || null, valor_mm: l.mm, data_hora: iso(l.ts), tipo: 'comprimento', origem: origemTab(l.o), ...car(l) });
+    }
+  }
+  for (const l of leiturasSoltas) T.medicao_leitura_laser.push({ id: l.id, area_id: null, grupo: null, valor_mm: l.mm, data_hora: iso(l.ts), tipo: 'comprimento', origem: origemTab(l.o), ...car(l) });
+  return T;
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmm = v => fL(v);
 const fdt = ts => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -238,7 +379,7 @@ function vHome() {
   document.getElementById('novoP').onclick = async () => {
     const nome = await pedir('Novo projeto', 'Nome (ex.: Apto 52 · Silva)');
     if (!nome) return;
-    const p = { id: uid(), nome, cliente: {}, criado: Date.now(), alt: Date.now(), areas: [] };
+    const p = { id: uid(), nome, pv: null, cliente: {}, criado: Date.now(), alt: Date.now(), areas: [] };
     S.projetos.push(p); await salvar(); ir({ v: 'proj', p: p.id });
   };
 }
@@ -247,6 +388,7 @@ const CAMPOS = [['nome', 'Nome'], ['sobrenome', 'Sobrenome'], ['empresa', 'Empre
 function vProj() {
   const p = proj();
   app.innerHTML = `
+  <div class="card"><label style="margin-top:0">Nº do PV (opcional)</label><input id="pvIn" inputmode="text" placeholder="Ex.: 1404" value="${esc(p.pv)}"></div>
   <div class="card"><div class="row"><b style="flex:1">Áreas / cômodos</b><button id="novaA" style="flex:0 0 auto" class="small">+ Área</button></div></div>
   <div id="areas">${p.areas.map(a => `
     <div class="list-item" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.nome)}</div>
@@ -258,6 +400,7 @@ function vProj() {
   <div class="row"><button class="btn2" id="expP">Exportar projeto (backup)</button><button class="btn2" id="renP">Renomear</button></div>
   <div class="row" style="margin-top:8px"><button class="btnbad" id="delP">Excluir projeto</button></div>`;
   app.querySelectorAll('#areas .list-item').forEach(el => el.onclick = () => ir({ v: 'area', p: p.id, a: el.dataset.id }));
+  document.getElementById('pvIn').onchange = ev => { p.pv = ev.target.value.trim() || null; tocar(); };
   app.querySelectorAll('[data-k]').forEach(el => el.onchange = () => { p.cliente[el.dataset.k] = el.value; tocar(); });
   document.getElementById('novaA').onclick = async () => {
     const nome = await pedir('Nova área', 'Nome do cômodo (ex.: Cozinha)');
@@ -1411,20 +1554,36 @@ function dxf(e, tres) {
   }
   return ['0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1009', '9', '$INSUNITS', '70', '6', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES', ...out, '0', 'ENDSEC', '0', 'EOF', ''].join('\r\n');
 }
-async function exportarProjeto(p) {
+const lerBlob = b => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); });
+// Envelope do backup: esquema 2 (UUID, carimbos, tabelas medicao_*). Versão 1 (v0.6) tinha só { projeto, fotos }.
+async function montarBackup(projetos, extra = {}) {
   const fotos = {};
-  for (const a of p.areas) for (const f of blobsDaArea(a)) { const b = await DB.get('fotos', f.id); if (b) fotos[f.id] = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); }); }
-  baixar(`${p.nome}.nycxo-medida.json`, JSON.stringify({ formato: 'nycxo-medida', versao: 1, exportado: new Date().toISOString(), projeto: p, fotos }), 'application/json');
+  for (const p of projetos) for (const a of p.areas) for (const f of blobsDaArea(a)) { const b = await DB.get('fotos', f.id); if (b) fotos[f.id] = await lerBlob(b); }
+  return { formato: 'nycxo-medida', versao: 2, esquema: ESQUEMA, app: VERSAO_APP, exportado: new Date().toISOString(), projetos, fotos, tabelas: paraTabelas(projetos, extra.leiturasSoltas || []), ...extra };
+}
+async function exportarProjeto(p) {
+  const j = await montarBackup([p]); j.projeto = p; // 'projeto' mantém leitura por versões antigas
+  baixar(`${p.nome}.nycxo-medida.json`, JSON.stringify(j), 'application/json');
+}
+// Lê um arquivo de backup de qualquer versão e devolve { projetos (migrados), fotos (por UUID), leiturasSoltas } ou null.
+async function lerBackup(f) {
+  let j; try { j = JSON.parse(await f.text()); } catch (e) { return null; }
+  if (!j || !['nycxo-medida', 'esquadro'].includes(j.formato)) return null;
+  const lista = j.projetos || (j.projeto ? [j.projeto] : []);
+  const proj = { projetos: JSON.parse(JSON.stringify(lista)), leiturasSoltas: j.leiturasSoltas || [] };
+  const mapa = migrarEstado(proj);
+  const fotos = {};
+  for (const [id, url] of Object.entries(j.fotos || {})) fotos[mapa.get(id) || id] = url;
+  return { projetos: proj.projetos, leiturasSoltas: proj.leiturasSoltas, fotos, esquema: j.esquema || 1, app: j.app || 'v0.6 ou anterior' };
 }
 async function importarProjeto(f) {
-  let j; try { j = JSON.parse(await f.text()); } catch (e) { return aviso('Arquivo inválido', 'Não é um backup do NYCXO Medida.'); }
-  if (!['nycxo-medida', 'esquadro'].includes(j.formato)) return aviso('Arquivo inválido', 'Não é um backup do NYCXO Medida.');
-  const ex = S.projetos.find(x => x.id === j.projeto.id);
+  const b = await lerBackup(f);
+  if (!b || !b.projetos.length) return aviso('Arquivo inválido', 'Não é um backup do NYCXO Medida.');
+  const p = b.projetos[0], ex = S.projetos.find(x => x.id === p.id);
   if (ex && !await confirmar(`“${ex.nome}” já existe neste aparelho. Substituir pela versão do arquivo?`)) return;
-  for (const [id, url] of Object.entries(j.fotos || {})) await DB.put('fotos', id, await (await fetch(url)).blob());
-  j.projeto.areas.forEach(migrarArea);
-  S.projetos = S.projetos.filter(x => x.id !== j.projeto.id); S.projetos.push(j.projeto); await salvar();
-  toast('Projeto importado.'); ir({ v: 'proj', p: j.projeto.id });
+  for (const [id, url] of Object.entries(b.fotos)) await DB.put('fotos', id, await (await fetch(url)).blob());
+  S.projetos = S.projetos.filter(x => x.id !== p.id); S.projetos.push(p); await salvar();
+  toast('Projeto importado.'); ir({ v: 'proj', p: p.id });
 }
 
 /* ===================== Importar planilha do laser (.xls BIFF8) ===================== */
@@ -1888,12 +2047,35 @@ async function gerarPDF(p, soArea) {
 
 const ESC = { pts: [] }; // pontos do dimensionamento
 
+/* ===================== Migração para o esquema atual ===================== */
+// Migra o estado inteiro (ids curtos -> UUID, carimbos, pv). Devolve o mapa id antigo -> UUID.
+function migrarEstado(est) {
+  est.projetos ??= []; est.leiturasSoltas ??= []; est.lixeira ??= []; est.excluidos ??= [];
+  const mapa = uuidizar(est);
+  est.projetos.forEach(p => { p.areas ??= []; p.cliente ??= {}; p.areas.forEach(migrarArea); completarProjeto(p, true); });
+  for (const x of est.lixeira) { const ps = x.tipo === 'projeto' ? x.dado : { id: x.projetoId, criado: x.dado.data, alt: x.em, areas: [x.dado] }; ps.areas.forEach(migrarArea); completarProjeto(ps, true); }
+  est.leiturasSoltas.forEach((l, i) => completar('leitura', l, null, null, true, i, Date.now()));
+  est.schema = ESQUEMA;
+  return mapa;
+}
+// Executada na abertura: cópia de segurança antes de migrar, depois copia as fotos para as chaves novas e só então apaga as antigas.
+async function migrarDados() {
+  S.lixeira ??= []; S.excluidos ??= []; S.leiturasSoltas ??= []; S.bkp ??= { ultimo: null, n: 0, desde: null };
+  if ((S.schema || 1) >= ESQUEMA) { S.projetos.forEach(p => p.areas.forEach(migrarArea)); return; }
+  await DB.put('kv', 'snap-mig:v1', { ts: Date.now(), motivo: 'Antes da atualização do modelo de dados', estado: S });
+  const mapa = migrarEstado(S);
+  for (const [velho, novo] of mapa) { const b = await DB.get('fotos', velho); if (b) await DB.put('fotos', novo, b); }
+  await DB.put('kv', 'estado', S);
+  for (const [velho] of mapa) await DB.del('fotos', velho);
+}
+
 /* ===================== Início ===================== */
 (async () => {
   await DB.open();
-  const e = await DB.get('kv', 'estado'); if (e) S = { leiturasSoltas: [], ...e };
-  S.projetos.forEach(p => p.areas.forEach(migrarArea));
+  const e = await DB.get('kv', 'estado'); if (e) S = { ...S, ...e, schema: e.schema || 1, bkp: { ...S.bkp, ...(e.bkp || {}) } };
+  try { await migrarDados(); } catch (err) { console.error('migracao', err); S.projetos.forEach(p => p.areas.forEach(migrarArea)); }
   normalizarCfg();
+  reiniciarFP();
   if (navigator.storage?.persist) navigator.storage.persist();
   render();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
