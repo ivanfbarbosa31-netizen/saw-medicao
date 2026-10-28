@@ -507,9 +507,9 @@ function vProj() {
   };
   document.getElementById('renP').onclick = async () => { const n = await pedir('Renomear projeto', 'Nome', p.nome); if (n) { p.nome = n; tocar(); render(); } };
   document.getElementById('delP').onclick = async () => {
-    if (!await confirmar(`Excluir “${p.nome}” e todas as medições e fotos? Não dá para desfazer.`)) return;
-    for (const a of p.areas) for (const f of blobsDaArea(a)) await DB.del('fotos', f.id);
-    S.projetos = S.projetos.filter(x => x !== p); await salvar(); ir({ v: 'home' });
+    if (!await confirmar(`Mover “${p.nome}” para a Lixeira? Fica lá por ${LIXEIRA_DIAS} dias e pode ser restaurado.`)) return;
+    p.excluido_em = Date.now(); S.lixeira.push({ id: uid(), tipo: 'projeto', em: p.excluido_em, nome: p.nome, dado: p });
+    S.projetos = S.projetos.filter(x => x !== p); await salvar(); toast('Projeto movido para a Lixeira.'); ir({ v: 'home' });
   };
   document.getElementById('expP').onclick = () => exportarProjeto(p);
   document.getElementById('pdfP').onclick = () => gerarPDF(p).catch(err => aviso('Erro ao gerar PDF', esc(err.message)));
@@ -892,9 +892,9 @@ function menuArea(a) {
   d.querySelector('#ar').onclick = async () => { d.close(); const n = await pedir('Renomear área', 'Nome', a.nome); if (n) { a.nome = n; tocar(); render(); } };
   d.querySelector('#ao').onclick = () => { d.close(); itensDaArea(a).forEach(it => it.o.pos = null); a.esbocos.forEach((e, i) => e.pos = { x: i * 1300, y: 0, w: 1200 }); posicionarItens(a); tocar(); render(); };
   d.querySelector('#ax').onclick = async () => {
-    d.close(); if (!await confirmar(`Excluir a área “${a.nome}” com esboços, fotos e notas?`)) return;
-    for (const f of blobsDaArea(a)) await DB.del('fotos', f.id);
-    const p = proj(); p.areas = p.areas.filter(x => x !== a); tocar(); ir({ v: 'proj', p: p.id });
+    d.close(); if (!await confirmar(`Mover a área “${a.nome}” para a Lixeira? Fica lá por ${LIXEIRA_DIAS} dias e pode ser restaurada.`)) return;
+    const p = proj(); a.excluido_em = Date.now(); S.lixeira.push({ id: uid(), tipo: 'area', em: a.excluido_em, nome: a.nome, projetoId: p.id, projetoNome: p.nome, dado: a });
+    p.areas = p.areas.filter(x => x !== a); tocar(); toast('Área movida para a Lixeira.'); ir({ v: 'proj', p: p.id });
   };
 }
 
@@ -1821,6 +1821,7 @@ function menuGeral() {
    <div style="display:grid;gap:8px;margin-top:10px">
     ${navigator.standalone || matchMedia('(display-mode: standalone)').matches ? '' : '<button class="btn2" id="mInst">Instalar no iPhone</button>'}
     <button class="btn2" id="mCfg">Configurações</button>
+    ${S.lixeira.length ? `<button class="btn2" id="mLix">Lixeira (${S.lixeira.length})</button>` : ''}
     <button class="btn2" id="mi">Importar projeto (backup .json)</button>
     <button class="btn2" id="mt">Testar recepção (medida simulada)</button>
     <button class="btn2" id="md">Diagnóstico do Bluetooth</button>
@@ -1831,6 +1832,7 @@ function menuGeral() {
   d.querySelector('#mf').onclick = () => d.close();
   d.querySelector('#mInst')?.addEventListener('click', () => aviso('Instalar no iPhone', 'No <b>Safari</b>, toque em <b>Compartilhar</b> (o quadrado com a seta) e depois em <b>Adicionar à Tela de Início</b>. O NYCXO Medida abre em tela cheia, com ícone próprio e funciona sem internet.<br><br>Para usar o laser por Bluetooth no iPhone, abra este mesmo endereço no navegador <b>Bluefy</b>.'));
   d.querySelector('#mCfg').onclick = () => { d.close(); const volta = { ...rota }; ir({ v: 'cfg', volta }); };
+  d.querySelector('#mLix')?.addEventListener('click', () => { d.close(); const volta = { ...rota }; ir({ v: 'cfg', volta }); setTimeout(() => document.getElementById('dLix')?.scrollIntoView(), 50); });
   d.querySelector('#mi').onclick = () => { d.close(); escolherArquivo('.json,application/json', importarProjeto); };
   d.querySelector('#mt').onclick = () => { d.close(); const dv = new DataView(new ArrayBuffer(20)); [0xC0, 0x55, 0x10, 0x04].forEach((v, i) => dv.setUint8(i, v)); dv.setFloat32(7, 0.56815, true); pacote(dv); };
   d.querySelector('#mS').onclick = () => { try { localStorage.setItem('nycxo-medida-so-trenas', soTrenas() ? '0' : '1'); } catch (e) { } d.close(); toast('Procurar só trenas: ' + (soTrenas() ? 'ligado (lista só GLM, PLR, Bosch)' : 'desligado (lista todos os aparelhos)'), 3500); };
@@ -1902,9 +1904,10 @@ function cardDados() {
    <div class="row" style="margin-top:12px"><button id="dSalvar">Salvar cópia agora</button><button class="btn2" id="dImp">Importar backup</button></div>
    ${per ? '' : '<button class="btn2" id="dPed" style="margin-top:8px;width:100%">Pedir proteção ao sistema</button>'}
    <p class="aviso-txt"><b>Onde ficam seus projetos.</b> Ficam só neste aparelho e neste navegador. O Safari, o Bluefy e o app instalado na Tela de Início guardam dados separados: um projeto criado em um deles não aparece nos outros. <b>Apagar os dados do site (nos Ajustes do iPhone ou no navegador) apaga todos os projetos.</b> O Safari também pode limpar dados de sites que ficam muitos dias sem uso. Salve uma cópia com frequência e guarde em Arquivos ou iCloud.</p></div>
-  <div class="card"><b>Cópias automáticas</b><p class="muted">O app guarda neste aparelho as últimas ${SNAP_MAX} versões. Ajuda a desfazer um erro, mas não substitui a cópia salva fora do aparelho.</p><div id="dSnaps" class="muted">Carregando…</div></div>`;
+  <div class="card"><b>Cópias automáticas</b><p class="muted">O app guarda neste aparelho as últimas ${SNAP_MAX} versões. Ajuda a desfazer um erro, mas não substitui a cópia salva fora do aparelho.</p><div id="dSnaps" class="muted">Carregando…</div></div>${cardLixeira()}`;
 }
 function ligarDados() {
+  ligarLixeira();
   document.getElementById('dSalvar').onclick = async ev => { ev.target.disabled = true; try { await exportarTudo(); } finally { render(); } };
   document.getElementById('dImp').onclick = () => escolherArquivo('.json,application/json', importarProjeto);
   document.getElementById('dPed')?.addEventListener('click', async () => { await iniciarPersist(); toast(PERSIST.persistente ? 'Armazenamento protegido.' : 'O navegador não concedeu a proteção. Salve cópias com frequência.', 4000); render(); });
@@ -2224,6 +2227,45 @@ async function gerarPDF(p, soArea) {
 
 const ESC = { pts: [] }; // pontos do dimensionamento
 
+/* ===================== Lixeira (30 dias) ===================== */
+const LIXEIRA_DIAS = 30, DIA = 86400e3;
+const blobsDoItem = x => x.tipo === 'projeto' ? x.dado.areas.flatMap(blobsDaArea) : blobsDaArea(x.dado);
+async function apagarDefinitivo(x) {
+  for (const f of blobsDoItem(x)) await DB.del('fotos', f.id);
+  S.lixeira = S.lixeira.filter(y => y !== x); delete URLS[x.id];
+}
+// Itens com mais de 30 dias saem de vez (e as fotos junto).
+async function limparLixeira() {
+  const vencidos = (S.lixeira || []).filter(x => Date.now() - x.em > LIXEIRA_DIAS * DIA);
+  for (const x of vencidos) await apagarDefinitivo(x);
+  if (vencidos.length) await salvar();
+  return vencidos.length;
+}
+async function restaurarDaLixeira(x) {
+  if (x.tipo === 'projeto') {
+    if (S.projetos.some(p => p.id === x.dado.id)) return aviso('Já existe', 'Este projeto já está na lista.');
+    x.dado.excluido_em = null; S.projetos.push(x.dado);
+  } else {
+    const p = S.projetos.find(q => q.id === x.projetoId);
+    if (!p) return aviso('Restaure o projeto primeiro', 'A área “' + esc(x.nome) + '” pertencia ao projeto “' + esc(x.projetoNome) + '”, que não está na lista. Restaure o projeto e depois a área.');
+    x.dado.excluido_em = null; p.areas.push(x.dado); p.alt = Date.now();
+  }
+  S.lixeira = S.lixeira.filter(y => y !== x); await salvar(); toast('Restaurado.'); render();
+}
+function cardLixeira() {
+  const L = [...(S.lixeira || [])].sort((a, b) => b.em - a.em);
+  return `<div class="card" id="dLix"><b>Lixeira</b><p class="muted">Projetos e áreas excluídos ficam aqui por ${LIXEIRA_DIAS} dias e podem ser restaurados. Depois disso são apagados de vez, com as fotos.</p>
+   ${L.length ? L.map(x => `<div class="kv"><span>${esc(x.nome)}<br><small>${x.tipo === 'projeto' ? 'Projeto' : 'Área de ' + esc(x.projetoNome)} · apaga em ${Math.max(0, Math.ceil((x.em + LIXEIRA_DIAS * DIA - Date.now()) / DIA))} dia(s)</small></span><span class="row" style="flex:0 0 auto;gap:6px"><button class="btn2 small" data-lrest="${x.id}">Restaurar</button><button class="btnbad small" data-ldel="${x.id}">Apagar</button></span></div>`).join('') : '<div class="vazio" style="padding:14px">Lixeira vazia.</div>'}</div>`;
+}
+function ligarLixeira() {
+  app.querySelectorAll('[data-lrest]').forEach(b => b.onclick = () => restaurarDaLixeira(S.lixeira.find(x => x.id === b.dataset.lrest)));
+  app.querySelectorAll('[data-ldel]').forEach(b => b.onclick = async () => {
+    const x = S.lixeira.find(y => y.id === b.dataset.ldel);
+    if (!await confirmar('Apagar “' + x.nome + '” de vez, com as fotos? Não dá para desfazer.')) return;
+    await apagarDefinitivo(x); await salvar(); render();
+  });
+}
+
 /* ===================== Migração para o esquema atual ===================== */
 // Migra o estado inteiro (ids curtos -> UUID, carimbos, pv). Devolve o mapa id antigo -> UUID.
 function migrarEstado(est) {
@@ -2253,6 +2295,7 @@ async function migrarDados() {
   try { await migrarDados(); } catch (err) { console.error('migracao', err); S.projetos.forEach(p => p.areas.forEach(migrarArea)); }
   normalizarCfg();
   reiniciarFP();
+  limparLixeira().catch(() => { });
   iniciarPersist().then(() => { if (rota.v === 'cfg') render(); });
   render();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
