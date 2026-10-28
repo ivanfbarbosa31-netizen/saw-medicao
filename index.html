@@ -1245,15 +1245,22 @@ function focarAlvo(inp, aplicar) {
 }
 
 /* ===================== Laser (Bluetooth LE) ===================== */
-// Protocolo levantado pela comunidade (sem documentação oficial):
-//   serviço 02a6c0d0-…, característica 02a6c0d1-… (indicate + write)
+// Protocolo levantado pela comunidade (sem documentação oficial). O quadro C0 55 é o mesmo em todos os perfis;
+// o que muda de modelo para modelo é o serviço/característica BLE:
+//   perfil A (GLM 50-27 C/CG, 100-25 C...): serviço 02a6c0d0-…, característica 02a6c0d1-… (indicate + write)
+//   perfil B (GLM 50 C, 100 C, PLR...):     serviço 00005301-0000-0041-5253-534f46540000, característica 00004301-… (indicate + write com resposta)
 //   escrever C0 55 02 01 00 1A liga o envio automático das medidas
 //   medida chega como C0 55 10 06 …, distância float32 LE em metros nos bytes 7..10
 const SVC = '02a6c0d0-0451-4000-b000-fb3210111989', CHR = '02a6c0d1-0451-4000-b000-fb3210111989';
+const PERFIS = [
+  { nome: 'A (02a6c0d0)', svc: SVC, chr: CHR, resp: false },
+  { nome: 'B (00005301, GLM 50 C)', svc: '00005301-0000-0041-5253-534f46540000', chr: '00004301-0000-0041-5253-534f46540000', resp: true }
+];
+const SVCS = PERFIS.map(p => p.svc);
 const L = { dev: null, ch: null, log: [], recentes: [], info: null };
 // Servicos extras so para o Diagnostico enxergar o que o aparelho tem (Web Bluetooth so mostra o que for listado aqui).
 // So UUIDs de 128 bits completos e em minusculas (alias/numeros curtos podem ser recusados por alguns navegadores).
-const OPC = [SVC, '00001800-0000-1000-8000-00805f9b34fb', '0000180a-0000-1000-8000-00805f9b34fb', '0000180f-0000-1000-8000-00805f9b34fb', '6e400001-b5a3-f393-e0a9-e50e24dcca9e', '0000ffe0-0000-1000-8000-00805f9b34fb', '0000fff0-0000-1000-8000-00805f9b34fb'];
+const OPC = [...SVCS, '00001800-0000-1000-8000-00805f9b34fb', '0000180a-0000-1000-8000-00805f9b34fb', '0000180f-0000-1000-8000-00805f9b34fb', '6e400001-b5a3-f393-e0a9-e50e24dcca9e', '0000ffe0-0000-1000-8000-00805f9b34fb', '0000fff0-0000-1000-8000-00805f9b34fb'];
 // Texto de qualquer coisa lancada (Error, string, objeto sem name/message).
 function txtErro(e) {
   let j = ''; try { j = JSON.stringify(e); } catch (x) { }
@@ -1283,7 +1290,7 @@ document.getElementById('lbtn').onclick = async () => {
       if (e1 && e1.name === 'NotFoundError') throw e1;
       // Fallback: alguns navegadores recusam a lista grande de servicos. Tenta o modo simples.
       L.erro1 = txtErro(e1);
-      try { L.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] }); }
+      try { L.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SVCS }); }
       catch (e2) { throw e2; }
     }
     L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)', servicos: null, erro: null };
@@ -1296,7 +1303,7 @@ document.getElementById('lbtn').onclick = async () => {
       aviso('Não conectou', esc(txtErro(e)) + (L.erro1 ? '<br><br>Primeira tentativa: ' + esc(L.erro1) : '') + '<br><br><button class="btn2" id="aSimples">Tentar de novo (modo simples)</button>');
       document.getElementById('aSimples').onclick = async () => {
         document.getElementById('dlg').close();
-        try { L.erro1 = null; L.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] });
+        try { L.erro1 = null; L.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SVCS });
           L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)', servicos: null, erro: null };
           L.dev.addEventListener('gattserverdisconnected', aoDesconectar); await conectarGatt();
         } catch (e3) { setLaser(false, 'Laser off'); if (e3 && e3.name === 'NotFoundError') toast('Nenhum aparelho escolhido.', 5000); else aviso('Não conectou', esc(txtErro(e3))); }
@@ -1308,18 +1315,29 @@ async function conectarGatt() {
   setLaser(false, 'Conectando…');
   const srv = await L.dev.gatt.connect();
   if (!L.info) L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)' };
-  L.info.servicos = null; L.info.erro = null;
-  try { L.info.servicos = (await srv.getPrimaryServices()).map(x => x.uuid); } catch (e) { L.info.servicos = 'não foi possível listar: ' + txtErro(e); }
-  try { L.ch = await (await srv.getPrimaryService(SVC)).getCharacteristic(CHR); }
-  catch (e) {
-    L.info.erro = txtErro(e);
+  L.info.servicos = null; L.info.erro = null; L.info.carac = []; L.info.perfil = null; L.perfil = null;
+  let visiveis = [];
+  try { visiveis = await srv.getPrimaryServices(); L.info.servicos = visiveis.map(x => x.uuid); } catch (e) { L.info.servicos = 'não foi possível listar: ' + txtErro(e); }
+  const props = c => { const p = c.properties || {}; return ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].filter(k => p[k]).join(','); };
+  // características de cada serviço visível (diagnóstico)
+  for (const sv of visiveis) { try { for (const c of await sv.getCharacteristics()) L.info.carac.push(sv.uuid + ' / ' + c.uuid + ' [' + props(c) + ']'); } catch (e) { L.info.carac.push(sv.uuid + ' / erro: ' + txtErro(e)); } }
+  // tenta cada perfil conhecido, em ordem
+  const falhas = [];
+  for (const pf of PERFIS) {
+    try { L.ch = await (await srv.getPrimaryService(pf.svc)).getCharacteristic(pf.chr); L.perfil = pf; L.info.perfil = pf.nome; break; }
+    catch (e) { falhas.push(pf.nome + ': ' + txtErro(e)); }
+  }
+  if (!L.perfil || !L.ch || L.info.perfil == null) {
+    L.info.erro = falhas.join(' | ');
     L.manual = true; try { L.dev.gatt.disconnect(); } catch (x) { }
-    throw new Error('Este aparelho (' + L.info.nome + ') não tem o serviço de medida esperado (' + L.info.erro + '). Veja o Diagnóstico no menu: ele mostra os serviços que o aparelho oferece. Pode ser outro modelo de trena.');
+    throw new Error('Este aparelho (' + L.info.nome + ') não tem nenhum dos serviços de medida conhecidos (' + L.info.erro + '). Veja o Diagnóstico no menu: ele lista os serviços e características que o aparelho mostrou.');
   }
   L.ch.addEventListener('characteristicvaluechanged', e => pacote(e.target.value));
   await L.ch.startNotifications();
   const cmd = new Uint8Array([0xC0, 0x55, 0x02, 0x01, 0x00, 0x1A]);
-  if (L.ch.writeValueWithoutResponse && L.ch.properties.writeWithoutResponse) await L.ch.writeValueWithoutResponse(cmd); else await L.ch.writeValue(cmd);
+  const pr = L.ch.properties || {};
+  const semResp = L.ch.writeValueWithoutResponse && pr.writeWithoutResponse && !(L.perfil.resp && pr.write);
+  if (semResp) await L.ch.writeValueWithoutResponse(cmd); else await L.ch.writeValue(cmd);
   rx = []; L.manual = false; setLaser(true, 'conectado'); toast('Laser conectado. Meça pelo botão do laser.');
 }
 async function aoDesconectar() {
@@ -1506,7 +1524,7 @@ function menuGeral() {
   d.querySelector('#mi').onclick = () => { d.close(); escolherArquivo('.json,application/json', importarProjeto); };
   d.querySelector('#mt').onclick = () => { d.close(); const dv = new DataView(new ArrayBuffer(20)); [0xC0, 0x55, 0x10, 0x04].forEach((v, i) => dv.setUint8(i, v)); dv.setFloat32(7, 0.56815, true); pacote(dv); };
   d.querySelector('#mS').onclick = () => { try { localStorage.setItem('nycxo-medida-so-trenas', soTrenas() ? '0' : '1'); } catch (e) { } d.close(); toast('Procurar só trenas: ' + (soTrenas() ? 'ligado (lista só GLM, PLR, Bosch)' : 'desligado (lista todos os aparelhos)'), 3500); };
-  d.querySelector('#md').onclick = () => { const I = L.info; const ap = I ? 'Aparelho: ' + I.nome + '\nId: ' + I.id + '\nServiços: ' + (Array.isArray(I.servicos) ? (I.servicos.join('\n  ') || 'nenhum visível') : (I.servicos || 'ainda não conectou')) + '\nErro: ' + (I.erro || 'nenhum') : 'Nenhum aparelho escolhido ainda.';
+  d.querySelector('#md').onclick = () => { const I = L.info; const ap = I ? 'Aparelho: ' + I.nome + '\nId: ' + I.id + '\nServiços: ' + (Array.isArray(I.servicos) ? (I.servicos.join('\n  ') || 'nenhum visível') : (I.servicos || 'ainda não conectou')) + '\nPerfil usado: ' + (I.perfil || 'nenhum') + '\nCaracterísticas (entre os serviços conhecidos):\n  ' + ((I.carac || []).join('\n  ') || 'nenhuma visível') + '\nErro: ' + (I.erro || 'nenhum') : 'Nenhum aparelho escolhido ainda.';
     d.innerHTML = `<b>Diagnóstico do Bluetooth</b><pre class="diag">${esc(ap)}</pre><b>Pacotes recebidos</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
 }
 
