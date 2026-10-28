@@ -1250,7 +1250,11 @@ function focarAlvo(inp, aplicar) {
 //   escrever C0 55 02 01 00 1A liga o envio automático das medidas
 //   medida chega como C0 55 10 06 …, distância float32 LE em metros nos bytes 7..10
 const SVC = '02a6c0d0-0451-4000-b000-fb3210111989', CHR = '02a6c0d1-0451-4000-b000-fb3210111989';
-const L = { dev: null, ch: null, log: [], recentes: [] };
+const L = { dev: null, ch: null, log: [], recentes: [], info: null };
+// Servicos extras so para o Diagnostico enxergar o que o aparelho tem (Web Bluetooth so mostra o que for listado aqui).
+const OPC = [SVC, 'generic_access', 'device_information', 'battery_service', '6e400001-b5a3-f393-e0a9-e50e24dcca9e', 0xFFE0, 0xFFF0];
+const NOMES_TRENA = ['GLM', 'PLR', 'Bosch', 'BOSCH', 'GLM50C']; // prefixo diferencia maiusculas; "GLM50C" ja cai em "GLM", fica explicito
+const soTrenas = () => { try { return localStorage.getItem('nycxo-medida-so-trenas') === '1'; } catch (e) { return false; } };
 function setLaser(on, txt) { document.getElementById('ldot').classList.toggle('on', on); document.getElementById('lst').textContent = txt; document.getElementById('lbtn').textContent = on ? 'Desligar' : 'Conectar'; }
 const hex = dv => [...new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)].map(b => b.toString(16).padStart(2, '0')).join(' ');
 document.getElementById('lbtn').onclick = async () => {
@@ -1259,20 +1263,37 @@ document.getElementById('lbtn').onclick = async () => {
     return aviso('Bluetooth indisponível neste navegador', `O Safari do iPhone não libera Bluetooth para sites. No iPhone, abra este endereço no app <b>Bluefy</b> (grátis na App Store). No computador ou Android use o <b>Chrome</b>.<br><br>Antes, desconecte o laser de qualquer outro app — ele só conversa com um aparelho por vez.`);
   }
   try {
-    L.dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }], optionalServices: [SVC] });
+    // A trena nao anuncia o servico no advertising (so aparece depois de conectar): filtrar por services deixa a lista vazia.
+    // Padrao: lista todos os aparelhos. Opcao do menu: so nomes de trena.
+    const opt = soTrenas() ? { filters: NOMES_TRENA.map(namePrefix => ({ namePrefix })), optionalServices: OPC }
+                           : { acceptAllDevices: true, optionalServices: OPC };
+    L.dev = await navigator.bluetooth.requestDevice(opt);
+    L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)', servicos: null, erro: null };
     L.dev.addEventListener('gattserverdisconnected', aoDesconectar);
     await conectarGatt();
-  } catch (e) { setLaser(false, 'Laser off'); if (e.name !== 'NotFoundError') aviso('Não conectou', esc(e.message)); }
+  } catch (e) {
+    setLaser(false, 'Laser off');
+    if (e.name === 'NotFoundError') toast('Nenhum aparelho escolhido. Se a lista veio vazia: ligue o Bluetooth da trena, feche o app oficial dela e tente "Procurar só trenas" no menu.', 7000);
+    else aviso('Não conectou', esc(e.name + ': ' + e.message));
+  }
 };
 async function conectarGatt() {
   setLaser(false, 'Conectando…');
   const srv = await L.dev.gatt.connect();
-  L.ch = await (await srv.getPrimaryService(SVC)).getCharacteristic(CHR);
+  if (!L.info) L.info = { nome: L.dev.name || '(sem nome)', id: L.dev.id || '(sem id)' };
+  L.info.servicos = null; L.info.erro = null;
+  try { L.info.servicos = (await srv.getPrimaryServices()).map(x => x.uuid); } catch (e) { L.info.servicos = 'não foi possível listar: ' + e.name + ': ' + e.message; }
+  try { L.ch = await (await srv.getPrimaryService(SVC)).getCharacteristic(CHR); }
+  catch (e) {
+    L.info.erro = e.name + ': ' + e.message;
+    L.manual = true; try { L.dev.gatt.disconnect(); } catch (x) { }
+    throw new Error('Este aparelho (' + L.info.nome + ') não tem o serviço de medida esperado (' + L.info.erro + '). Veja o Diagnóstico no menu: ele mostra os serviços que o aparelho oferece. Pode ser outro modelo de trena.');
+  }
   L.ch.addEventListener('characteristicvaluechanged', e => pacote(e.target.value));
   await L.ch.startNotifications();
   const cmd = new Uint8Array([0xC0, 0x55, 0x02, 0x01, 0x00, 0x1A]);
   if (L.ch.writeValueWithoutResponse && L.ch.properties.writeWithoutResponse) await L.ch.writeValueWithoutResponse(cmd); else await L.ch.writeValue(cmd);
-  L.manual = false; setLaser(true, 'conectado'); toast('Laser conectado. Meça pelo botão do laser.');
+  rx = []; L.manual = false; setLaser(true, 'conectado'); toast('Laser conectado. Meça pelo botão do laser.');
 }
 async function aoDesconectar() {
   setLaser(false, 'Laser off');
@@ -1280,12 +1301,24 @@ async function aoDesconectar() {
   for (let t = 0; t < 3; t++) { try { await new Promise(r => setTimeout(r, 1500)); await conectarGatt(); return; } catch (e) { } }
   toast('Laser desconectou.');
 }
+// Quadro: C0 55 10 <tipo> <3 bytes> <float32 LE em metros a partir do byte 7> ... = 20 bytes. O CRC nao e validado.
+// tipo>>2 = modo (1 distancia, 2 continuo, 63 erro de medicao); tipo&3 = referencia (frente, traseira...).
+// Remonta quadros fragmentados ou colados numa mesma notificacao.
+let rx = [], rxTs = 0;
 function pacote(dv) {
   L.log.unshift(new Date().toLocaleTimeString('pt-BR') + '  ' + hex(dv)); L.log.length = Math.min(L.log.length, 60);
-  const b = i => dv.getUint8(i);
-  if (dv.byteLength >= 11 && b(0) === 0xC0 && b(1) === 0x55 && b(2) === 0x10 && b(3) === 0x06) {
-    const m = dv.getFloat32(7, true);
-    if (m > 0 && m < 300) receber(Math.round(m * 10000) / 10, 'laser');
+  if (Date.now() - rxTs > 1500) rx = [];                // sobra de quadro incompleto antigo: descarta
+  rxTs = Date.now();
+  rx.push(...new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
+  for (;;) {
+    let i = -1; for (let k = 0; k + 2 < rx.length; k++) if (rx[k] === 0xC0 && rx[k + 1] === 0x55 && rx[k + 2] === 0x10) { i = k; break; }
+    if (i < 0) { rx = rx.slice(-2); return; }           // sem cabecalho (ex.: resposta curta ao comando): descarta
+    if (i > 0) rx = rx.slice(i);
+    if (rx.length < 20) return;                         // fragmentado: espera o resto
+    const f = new DataView(new Uint8Array(rx.slice(0, 20)).buffer); rx = rx.slice(20);
+    const modo = f.getUint8(3) >> 2;
+    if (modo === 1) { const m = f.getFloat32(7, true); if (m > 0.001 && m < 300) receber(Math.round(m * 10000) / 10, 'laser'); }
+    else if (modo === 63) toast('O laser não conseguiu medir. Tente de novo.', 2500);
   }
 }
 // Leitura nova: vai para o campo amarelo, senão para as leituras da área aberta.
@@ -1436,6 +1469,7 @@ function menuGeral() {
     <button class="btn2" id="mi">Importar projeto (backup .json)</button>
     <button class="btn2" id="mt">Testar recepção (medida simulada)</button>
     <button class="btn2" id="md">Diagnóstico do Bluetooth</button>
+    <button class="btn2" id="mS">Procurar só trenas: ${soTrenas() ? "ligado" : "desligado"}</button>
     <button id="mf">Fechar</button></div>
    <p class="muted">NYCXO Medida · v0.6 · ferramenta de apoio do NYCXO · dados guardados só neste aparelho. ${S.leiturasSoltas.length ? S.leiturasSoltas.length + ' leitura(s) feitas fora de uma área.' : ''}</p>`;
   d.showModal();
@@ -1443,8 +1477,10 @@ function menuGeral() {
   d.querySelector('#mInst')?.addEventListener('click', () => aviso('Instalar no iPhone', 'No <b>Safari</b>, toque em <b>Compartilhar</b> (o quadrado com a seta) e depois em <b>Adicionar à Tela de Início</b>. O NYCXO Medida abre em tela cheia, com ícone próprio e funciona sem internet.<br><br>Para usar o laser por Bluetooth no iPhone, abra este mesmo endereço no navegador <b>Bluefy</b>.'));
   d.querySelector('#mCfg').onclick = () => { d.close(); const volta = { ...rota }; ir({ v: 'cfg', volta }); };
   d.querySelector('#mi').onclick = () => { d.close(); escolherArquivo('.json,application/json', importarProjeto); };
-  d.querySelector('#mt').onclick = () => { d.close(); const dv = new DataView(new ArrayBuffer(12)); [0xC0, 0x55, 0x10, 0x06].forEach((v, i) => dv.setUint8(i, v)); dv.setFloat32(7, 0.56815, true); pacote(dv); };
-  d.querySelector('#md').onclick = () => { d.innerHTML = `<b>Pacotes recebidos do laser</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
+  d.querySelector('#mt').onclick = () => { d.close(); const dv = new DataView(new ArrayBuffer(20)); [0xC0, 0x55, 0x10, 0x04].forEach((v, i) => dv.setUint8(i, v)); dv.setFloat32(7, 0.56815, true); pacote(dv); };
+  d.querySelector('#mS').onclick = () => { try { localStorage.setItem('nycxo-medida-so-trenas', soTrenas() ? '0' : '1'); } catch (e) { } d.close(); toast('Procurar só trenas: ' + (soTrenas() ? 'ligado (lista só GLM, PLR, Bosch)' : 'desligado (lista todos os aparelhos)'), 3500); };
+  d.querySelector('#md').onclick = () => { const I = L.info; const ap = I ? 'Aparelho: ' + I.nome + '\nId: ' + I.id + '\nServiços: ' + (Array.isArray(I.servicos) ? (I.servicos.join('\n  ') || 'nenhum visível') : (I.servicos || 'ainda não conectou')) + '\nErro: ' + (I.erro || 'nenhum') : 'Nenhum aparelho escolhido ainda.';
+    d.innerHTML = `<b>Diagnóstico do Bluetooth</b><pre class="diag">${esc(ap)}</pre><b>Pacotes recebidos</b><pre class="diag">${esc(L.log.join('\n')) || 'nada ainda'}</pre><button id="dk">OK</button>`; d.querySelector('#dk').onclick = () => d.close(); };
 }
 
 /* ===================== Configurações ===================== */
