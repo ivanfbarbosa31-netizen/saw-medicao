@@ -1628,13 +1628,15 @@ function baixar(nome, data, tipo) {
   if (navigator.canShare && navigator.canShare({ files: [new File([blob], nm)] })) { navigator.share({ files: [new File([blob], nm, { type: blob.type })] }).catch(() => { }); return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nm; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
-// DXF R12 ASCII, unidades em metros, só LINE, camadas PAREDE / PORTA / JANELA.
+// DXF AC1015 (R2000) ASCII, unidades em milímetros ($INSUNITS 4), só LINE, camadas PAREDE / PORTA / JANELA declaradas na tabela LAYER.
+const DXF_CAMADAS = [['0', 7], ['PAREDE', 7], ['PORTA', 3], ['JANELA', 5]];
 function dxf(e, tres) {
-  const g = esbGeo(e), H = (+e.altura || 0) / 1000, out = [];
-  const f = n => (Math.round(n * 1e6) / 1e6).toString();
-  const line = (ly, p, q) => out.push('0', 'LINE', '8', ly, '10', f(p[0]), '20', f(p[1]), '30', f(p[2] || 0), '11', f(q[0]), '21', f(q[1]), '31', f(q[2] || 0));
+  const g = esbGeo(e), H = +e.altura || 0, linhas = [];
+  const f = n => (Math.round(n * 1000) / 1000).toString();
   // tela tem y para baixo; no CAD y é para cima
-  const P = g.P.map(([x, y]) => [x / 1000, -y / 1000]);
+  const P = g.P.map(([x, y]) => [x, -y]);
+  const segs = [];
+  const line = (ly, p, q) => segs.push([ly, p, q]);
   for (let i = 0; i < g.n; i++) {
     const p = P[i], q = P[i + 1];
     line('PAREDE', [...p, 0], [...q, 0]);
@@ -1644,12 +1646,54 @@ function dxf(e, tres) {
   for (const o of e.aberturas) {
     const i = +o.parede; if (i >= g.n) continue;
     const [x1, y1] = P[i], [x2, y2] = P[i + 1], Lw = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / Lw, uy = (y2 - y1) / Lw;
-    const d1 = (+o.dist || 0) / 1000, d2 = d1 + (+o.larg || 0) / 1000, z1 = tres ? (+o.peit || 0) / 1000 : 0, z2 = tres ? z1 + (+o.alt || 0) / 1000 : 0;
+    const d1 = +o.dist || 0, d2 = d1 + (+o.larg || 0), z1 = tres ? (+o.peit || 0) : 0, z2 = tres ? z1 + (+o.alt || 0) : 0;
     const A = [x1 + ux * d1, y1 + uy * d1], B = [x1 + ux * d2, y1 + uy * d2], ly = o.tipo === 'porta' ? 'PORTA' : 'JANELA';
     if (tres) { line(ly, [...A, z1], [...B, z1]); line(ly, [...B, z1], [...B, z2]); line(ly, [...B, z2], [...A, z2]); line(ly, [...A, z2], [...A, z1]); }
-    else { const nx = -uy * 0.1, ny = ux * 0.1; line(ly, A, B); line(ly, B, [B[0] + nx, B[1] + ny]); line(ly, [B[0] + nx, B[1] + ny], [A[0] + nx, A[1] + ny]); line(ly, [A[0] + nx, A[1] + ny], A); }
+    else { const nx = -uy * 100, ny = ux * 100; line(ly, A, B); line(ly, B, [B[0] + nx, B[1] + ny]); line(ly, [B[0] + nx, B[1] + ny], [A[0] + nx, A[1] + ny]); line(ly, [A[0] + nx, A[1] + ny], A); }
   }
-  return ['0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1009', '9', '$INSUNITS', '70', '6', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES', ...out, '0', 'ENDSEC', '0', 'EOF', ''].join('\r\n');
+  let h = 0x20; const H_ = () => (h++).toString(16).toUpperCase();
+  const add = (...v) => linhas.push(...v.map(String));
+  const hMS = H_(), hPS = H_(), hLay = H_(), hLt = H_(), hSt = H_(), hAp = H_(), hBr = H_(), hVp = H_(), hRoot = H_(), hGrp = H_();
+  const pts = segs.flatMap(sg => [sg[1], sg[2]]);
+  const mn = pts.length ? [Math.min(...pts.map(p => p[0])), Math.min(...pts.map(p => p[1])), Math.min(...pts.map(p => p[2] || 0))] : [0, 0, 0];
+  const mx = pts.length ? [Math.max(...pts.map(p => p[0])), Math.max(...pts.map(p => p[1])), Math.max(...pts.map(p => p[2] || 0))] : [0, 0, 0];
+  // HEADER
+  add(0, 'SECTION', 2, 'HEADER', 9, '$ACADVER', 1, 'AC1015', 9, '$HANDSEED', 5, 'FFFFF', 9, '$INSBASE', 10, 0, 20, 0, 30, 0,
+    9, '$EXTMIN', 10, f(mn[0]), 20, f(mn[1]), 30, f(mn[2]), 9, '$EXTMAX', 10, f(mx[0]), 20, f(mx[1]), 30, f(mx[2]),
+    9, '$MEASUREMENT', 70, 1, 9, '$INSUNITS', 70, 4, 9, '$LUNITS', 70, 2, 9, '$LUPREC', 70, 0, 0, 'ENDSEC');
+  add(0, 'SECTION', 2, 'CLASSES', 0, 'ENDSEC');
+  // TABLES
+  const tabela = (nome, th, n, corpo) => { add(0, 'TABLE', 2, nome, 5, th, 330, 0, 100, 'AcDbSymbolTable', 70, n); corpo(th); add(0, 'ENDTAB'); };
+  add(0, 'SECTION', 2, 'TABLES');
+  tabela('VPORT', hVp, 0, () => { });
+  tabela('LTYPE', hLt, 3, th => {
+    add(0, 'LTYPE', 5, H_(), 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbLinetypeTableRecord', 2, 'ByBlock', 70, 0, 3, '', 72, 65, 73, 0, 40, 0);
+    add(0, 'LTYPE', 5, H_(), 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbLinetypeTableRecord', 2, 'ByLayer', 70, 0, 3, '', 72, 65, 73, 0, 40, 0);
+    add(0, 'LTYPE', 5, H_(), 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbLinetypeTableRecord', 2, 'CONTINUOUS', 70, 0, 3, 'Solid line', 72, 65, 73, 0, 40, 0);
+  });
+  tabela('LAYER', hLay, DXF_CAMADAS.length, th => { for (const [nome, cor] of DXF_CAMADAS) add(0, 'LAYER', 5, H_(), 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbLayerTableRecord', 2, nome, 70, 0, 62, cor, 6, 'CONTINUOUS'); });
+  tabela('STYLE', hSt, 1, th => add(0, 'STYLE', 5, H_(), 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbTextStyleTableRecord', 2, 'STANDARD', 70, 0, 40, 0, 41, 1, 50, 0, 71, 0, 42, 2.5, 3, 'txt', 4, ''));
+  tabela('APPID', hAp, 1, th => add(0, 'APPID', 5, H_(), 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbRegAppTableRecord', 2, 'ACAD', 70, 0));
+  tabela('BLOCK_RECORD', hBr, 2, th => {
+    add(0, 'BLOCK_RECORD', 5, hMS, 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbBlockTableRecord', 2, '*Model_Space');
+    add(0, 'BLOCK_RECORD', 5, hPS, 330, th, 100, 'AcDbSymbolTableRecord', 100, 'AcDbBlockTableRecord', 2, '*Paper_Space');
+  });
+  add(0, 'ENDSEC');
+  // BLOCKS
+  add(0, 'SECTION', 2, 'BLOCKS');
+  for (const [nome, hb, ps] of [['*Model_Space', hMS, 0], ['*Paper_Space', hPS, 1]]) {
+    add(0, 'BLOCK', 5, H_(), 330, hb, 100, 'AcDbEntity', ...(ps ? [67, 1] : []), 8, 0, 100, 'AcDbBlockBegin', 2, nome, 70, 0, 10, 0, 20, 0, 30, 0, 3, nome, 1, '');
+    add(0, 'ENDBLK', 5, H_(), 330, hb, 100, 'AcDbEntity', ...(ps ? [67, 1] : []), 8, 0, 100, 'AcDbBlockEnd');
+  }
+  add(0, 'ENDSEC');
+  // ENTITIES
+  add(0, 'SECTION', 2, 'ENTITIES');
+  for (const [ly, p, q] of segs) add(0, 'LINE', 5, H_(), 330, hMS, 100, 'AcDbEntity', 8, ly, 100, 'AcDbLine', 10, f(p[0]), 20, f(p[1]), 30, f(p[2] || 0), 11, f(q[0]), 21, f(q[1]), 31, f(q[2] || 0));
+  add(0, 'ENDSEC');
+  // OBJECTS
+  add(0, 'SECTION', 2, 'OBJECTS', 0, 'DICTIONARY', 5, hRoot, 330, 0, 100, 'AcDbDictionary', 281, 1, 3, 'ACAD_GROUP', 350, hGrp,
+    0, 'DICTIONARY', 5, hGrp, 330, hRoot, 100, 'AcDbDictionary', 281, 1, 0, 'ENDSEC', 0, 'EOF');
+  return linhas.join('\r\n') + '\r\n';
 }
 const lerBlob = b => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); });
 // Envelope do backup: esquema 2 (UUID, carimbos, tabelas medicao_*). Versão 1 (v0.6) tinha só { projeto, fotos }.
