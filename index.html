@@ -217,7 +217,7 @@ let S = { projetos: [], leiturasSoltas: [], lixeira: [], excluidos: [], bkp: { u
 // Cada projeto, área, item, valor e leitura tem: id (UUID estável), criado_em, alterado_em e excluido_em (ms).
 // Estrutura: projeto > área > item (esboço, foto, nota, scan) > valor (parede, abertura, seta, altura) + leitura do laser.
 // Origem da medida: laser | manual (digitada) | importada | nula (estimada). Projeto tem o campo opcional pv.
-const ESQUEMA = 2, VERSAO_APP = '0.7';
+const ESQUEMA = 2, VERSAO_APP = '0.8';
 const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function hash128(str) {
   let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
@@ -432,6 +432,9 @@ function paraTabelas(projetos, leiturasSoltas = []) {
         T.medicao_item.push({ id: e.id, area_id: a.id, tipo: 'esboco', nome: e.nome, arquivo: null, dados: e, ...car(e) });
         e.walls.forEach((w, i) => val(w.id, e.id, 'parede:' + (i + 1), w.mm != null ? w.mm : g.len[i], w.mm != null ? w.o : null, w));
         if (e.altura != null) val(uuidDet(e.id + '#altura'), e.id, 'altura', e.altura, e.alturaO, e);
+        e.walls.forEach((w, i) => (w.tres || []).forEach((v, j) => { if (v != null) val(uuidDet(w.id + '#tres' + j), e.id, `parede:${i + 1}:3pts:${['alto', 'meio', 'baixo'][j]}`, v, w.tresO?.[j], w); }));
+        if (e.diag) [1, 2].forEach(n => { if (e.diag['d' + n] != null) val(uuidDet(e.id + '#diag' + n), e.id, 'diagonal:' + n, e.diag['d' + n], e.diag['o' + n], e); });
+        (e.pontos || []).forEach(pt => { for (const c of ['x', 'h']) val(uuidDet(pt.id + '#' + c), e.id, `ponto:${pt.tipo}:parede:${+pt.parede + 1}:${c === 'x' ? 'dist_esquerda' : 'altura'}`, +pt[c], pt.o, e); });
         e.aberturas.forEach((o, i) => { for (const c of ['larg', 'alt', 'peit']) if (o[c] != null) val(uuidDet(o.id + '#' + c), e.id, `abertura:${o.tipo}:${i + 1}:${c}`, +o[c], o.o || 'manual', o); });
       }
       for (const f of a.fotos) {
@@ -463,6 +466,7 @@ const IC = {
   ajustar: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>', menos: '<path d="M5 12h14"/>',
   desfazer: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>', link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
   regua: '<path d="M4 20V4h5v11h11v5z"/><path d="M4 8h2M4 12h2M8 20v-2M12 20v-2M16 20v-2"/>', altura: '<path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/>',
+  vista: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 16h18"/><rect x="6" y="9" width="4" height="7"/><circle cx="15.5" cy="11.5" r="1.3"/>',
   seta: '<path d="M5 19L19 5"/><path d="M5 13v6h6M13 5h6v6"/>', leituras: '<path d="M4 6h16M4 12h16M4 18h10"/>', baixar: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', esquadro: '<path d="M5 4v15h15"/><path d="M5 14h5v5"/>', texto: '<path d="M5 7V5h14v2M12 5v14M9 19h6"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24">${IC[n]}</svg>`;
@@ -486,7 +490,8 @@ const area = () => proj()?.areas.find(a => a.id === rota.a);
 function ir(r) { rota = r; alvo = null; render(); window.scrollTo(0, 0); }
 document.getElementById('voltar').onclick = () => {
   if (rota.v === 'cfg' || rota.v === 'sobre') return ir(rota.volta || { v: 'home' });
-  if (rota.v === '3d') return ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
+  if (rota.v === '3d' || rota.v === 'parede') return ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
+  if (rota.v === 'check') return ir({ v: 'area', p: rota.p, a: rota.a });
   if (rota.v === 'foto' && rota.de === 'esb') ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
   else if (rota.v === 'esb' && rota.pick) ir({ v: 'foto', p: rota.p, a: rota.a, f: rota.pick });
   else if (['foto', 'esb', 'leituras'].includes(rota.v)) ir({ v: 'area', p: rota.p, a: rota.a });
@@ -497,7 +502,7 @@ document.getElementById('menu').onclick = menuGeral;
 
 async function render() {
   if (V3 && rota.v !== '3d') parar3D();
-  document.body.classList.toggle('travado', ['area', 'esb', 'foto'].includes(rota.v));
+  document.body.classList.toggle('travado', ['area', 'esb', 'foto', 'parede'].includes(rota.v));
   document.getElementById('voltar').style.display = rota.v === 'home' ? 'none' : '';
   const t = document.getElementById('titulo');
   if (rota.v === 'home') { t.innerHTML = '<span class="logo"></span><span class="marca">NYCXO <i>medida</i></span>'; vHome(); }
@@ -508,6 +513,8 @@ async function render() {
   else if (rota.v === 'cfg') { t.textContent = 'Configurações'; vCfg(); }
   else if (rota.v === 'sobre') { t.textContent = 'Sobre'; vSobre(); }
   else if (rota.v === '3d') { t.textContent = area().nome + ' · 3D'; await v3D(); }
+  else if (rota.v === 'parede') { t.textContent = (area().esbocos.find(x => x.id === rota.e)?.nome || area().nome) + ` · parede P${rota.w + 1}`; vParede(); }
+  else if (rota.v === 'check') { t.textContent = area().nome + ' · checklist'; vChecklist(); }
   else if (rota.v === 'foto') { t.textContent = area().nome + ' · foto'; await vFoto(); }
   renderChips();
 }
@@ -789,7 +796,7 @@ async function vBase() {
   await carregarUrls(a);
   for (const f of a.fotos) if (!f.ar && URLS[f.id]) { const im = new Image(); im.src = URLS[f.id]; await im.decode().catch(() => { }); if (im.naturalWidth) f.ar = im.naturalHeight / im.naturalWidth; }
   app.innerHTML = `
-  <div class="ftool"><button class="small btn2" id="bLeit">${ic('leituras')} Leituras · ${a.leituras.length}</button><span style="flex:1"></span>${KIT_ZOOM}<button class="small btn2" id="bMais" aria-label="Mais">${ic('mais')}</button></div>
+  <div class="ftool"><button class="small btn2" id="bLeit">${ic('leituras')} Leituras · ${a.leituras.length}</button><button class="small btn2" id="bCheck">${ic('ok')} Checklist · ${checkProgresso(a).feito}/${checkProgresso(a).total}</button><span style="flex:1"></span>${KIT_ZOOM}<button class="small btn2" id="bMais" aria-label="Mais">${ic('mais')}</button></div>
   <div class="board"><svg id="bsvg" class="vsvg"><g class="cam"></g></svg>
    <div class="fdica" id="bdica" ${itensDaArea(a).length ? 'hidden' : ''}>Toque em + para criar o esboço, tirar fotos ou anotar</div>
    <button class="fab" id="bAdd" aria-label="Adicionar">${ic('add')}</button></div>`;
@@ -870,6 +877,7 @@ async function vBase() {
   const ajustar = () => v.enquadrar(caixaUniao(itensDaArea(a).filter(visivel).map(caixaItem)));
   ligarZoom(app, v, ajustar); ajustar();
   document.getElementById('bLeit').onclick = () => ir({ v: 'leituras', p: rota.p, a: rota.a });
+  document.getElementById('bCheck').onclick = () => ir({ v: 'check', p: rota.p, a: rota.a });
   document.getElementById('bAdd').onclick = () => menuAdicionar(a, v);
   document.getElementById('bMais').onclick = () => menuArea(a);
   rota.vista = v;
@@ -943,8 +951,9 @@ async function abrirScan(a, o) {
 }
 function menuArea(a) {
   const d = document.getElementById('dlg');
-  d.innerHTML = `<b>${esc(a.nome)}</b><div style="display:grid;gap:8px;margin-top:10px">${a.esbocos.length ? `<button id="a3d">${ic('cubo')} Ver em 3D</button>` : ''}<button class="btn2" id="aImpScan">${ic('baixar')} Importar scan (JSON)</button><button class="btn2" id="aPdf">${ic('baixar')} PDF deste ambiente</button><button class="btn2" id="ar">Renomear área</button><button class="btn2" id="ao">Organizar itens</button><button class="btnbad" id="ax">Excluir área</button><button id="af">Fechar</button></div>`;
+  d.innerHTML = `<b>${esc(a.nome)}</b><div style="display:grid;gap:8px;margin-top:10px"><button class="btn2" id="aChk">${ic('ok')} Checklist da medição · ${checkProgresso(a).feito}/${checkProgresso(a).total}</button>${a.esbocos.length ? `<button id="a3d">${ic('cubo')} Ver em 3D</button>` : ''}<button class="btn2" id="aImpScan">${ic('baixar')} Importar scan (JSON)</button><button class="btn2" id="aPdf">${ic('baixar')} PDF deste ambiente</button><button class="btn2" id="ar">Renomear área</button><button class="btn2" id="ao">Organizar itens</button><button class="btnbad" id="ax">Excluir área</button><button id="af">Fechar</button></div>`;
   d.showModal(); d.querySelector('#af').onclick = () => d.close();
+  d.querySelector('#aChk').onclick = () => { d.close(); ir({ v: 'check', p: rota.p, a: a.id }); };
   d.querySelector('#a3d')?.addEventListener('click', () => { d.close(); ir({ v: '3d', p: rota.p, a: a.id, e: a.esbocos[0].id }); });
   d.querySelector('#aImpScan').onclick = () => { d.close(); escolherArquivo('.json,application/json', f => importarScanArquivo(a, f)); };
   d.querySelector('#aPdf').onclick = () => { d.close(); gerarPDF(proj(), a).catch(err => aviso('Erro ao gerar PDF', esc(err.message))); };
@@ -970,7 +979,7 @@ function vEsboco() {
   <div class="board"><svg id="esvg" class="vsvg esb"><g class="cam"><g id="egrid"></g><g id="edes"></g><g id="emark"></g></g></svg><div class="fdica" id="edica" hidden></div><button class="notapill" id="eNotaP" hidden></button></div>
   <div id="ebar" class="fbar" hidden></div>`;
   const svg = document.getElementById('esvg'), gg = document.getElementById('egrid'), gd = document.getElementById('edes');
-  let modo = !e.pts.length && !pick ? 'desenhar' : 'editar', sel = null, previa = null, hover = null, mira = null;
+  let modo = !e.pts.length && !pick ? 'desenhar' : 'editar', sel = null, previa = null, hover = null, mira = null, mostraDiag = false;
   const naMira = w => [w[0], w[1] - MIRA_PX * v.k];
   const dica = t => { const d = document.getElementById('edica'); d.hidden = !t; d.textContent = t || ''; };
   const grade = () => {
@@ -1003,6 +1012,12 @@ function vEsboco() {
         <circle cx="${rx}" cy="${ry}" r="${16 * k}" fill="rgba(228,87,46,.08)" stroke="#e4572e" stroke-width="${1.6 * k}"/>
         <path d="M ${rx - q} ${ry} H ${rx - 6 * k} M ${rx + 6 * k} ${ry} H ${rx + q} M ${rx} ${ry - q} V ${ry - 6 * k} M ${rx} ${ry + 6 * k} V ${ry + q}" stroke="#e4572e" stroke-width="${1.6 * k}"/>
         <circle cx="${rx}" cy="${ry}" r="${1.8 * k}" fill="#e4572e"/>`;
+    }
+    if (mostraDiag && e.fechado && nParedes(e) === 4) {
+      // diagonais do esquadro: D1 liga os cantos 1 e 3, D2 liga os cantos 2 e 4
+      const P = esbGeo(e).P;
+      [[0, 2, 'D1'], [1, 3, 'D2']].forEach(([i, j, n]) => { pv += `<line x1="${P[i][0]}" y1="${P[i][1]}" x2="${P[j][0]}" y2="${P[j][1]}" stroke="#2f6fd6" stroke-width="${1.6 * k}" stroke-dasharray="${6 * k} ${4 * k}"/>
+        <text x="${(P[i][0] * 3 + P[j][0]) / 4}" y="${(P[i][1] * 3 + P[j][1]) / 4 - 6 * k}" font-size="${12 * k}" font-weight="700" fill="#2f6fd6">${n}</text>`; });
     }
     gd.innerHTML = svgEsboco(e, k, { sel: sel?.t === 'w' ? sel.i : null, selV: sel?.t === 'v' ? sel.i : null, selO: sel?.t === 'o' ? sel.i : null, alcas: modo === 'editar' && !pick, previa: pv, fotos: a.fotos });
   };
@@ -1109,7 +1124,7 @@ function vEsboco() {
     if (s.t === 'w') {
       const w = e.walls[s.i], g = esbGeo(e);
       bar.innerHTML = `<b>P${s.i + 1}</b><input id="emm" inputmode="decimal" class="alvo" value="${w.mm != null ? Math.round(w.mm) : ''}" placeholder="≈ ${Math.round(g.len[s.i])}"><span id="eori">${w.mm != null ? oTag(w.o) : ''}</span>
-        <button class="small btn2" data-ab="porta" aria-label="Porta">${ic('porta')}</button><button class="small btn2" data-ab="janela" aria-label="Janela">${ic('janela')}</button><button class="small btn2" id="eDiv" aria-label="Dividir">${ic('dividir')}</button><button class="small btnbad" id="eWx" aria-label="Excluir parede">${ic('lixo')}</button><button class="small btn2" id="eOk" aria-label="Fechar">${ic('ok')}</button>`;
+        <button class="small btn2" id="eTres" aria-label="Medir em 3 pontos">3×</button><button class="small btn2" id="eVista" aria-label="Vista da parede">${ic('vista')}</button><button class="small btn2" data-ab="porta" aria-label="Porta">${ic('porta')}</button><button class="small btn2" data-ab="janela" aria-label="Janela">${ic('janela')}</button><button class="small btn2" id="eDiv" aria-label="Dividir">${ic('dividir')}</button><button class="small btnbad" id="eWx" aria-label="Excluir parede">${ic('lixo')}</button><button class="small btn2" id="eOk" aria-label="Fechar">${ic('ok')}</button>`;
       const inp = document.getElementById('emm');
       const grava = (val, o) => { w.mm = val; w.o = val == null ? null : o; tocar(); desenha(); document.getElementById('eori').innerHTML = val != null ? oTag(w.o) : ''; };
       alvo = { inp, aplicar: val => { inp.value = Math.round(val); grava(val, 'laser'); const nx = e.walls.findIndex((x, j) => j > s.i && x.mm == null); setTimeout(() => selecionar(nx >= 0 ? { t: 'w', i: nx } : s), 350); } };
@@ -1121,6 +1136,8 @@ function vEsboco() {
         tocar(); selecionar({ t: 'o', i: e.aberturas.length - 1 });
       });
       document.getElementById('eDiv').onclick = () => { dividirParede(e, s.i, a); tocar(); selecionar({ t: 'w', i: s.i }); };
+      document.getElementById('eVista').onclick = () => ir({ v: 'parede', p: rota.p, a: rota.a, e: e.id, w: s.i });
+      document.getElementById('eTres').onclick = () => barraTres(s.i);
       document.getElementById('eWx').onclick = async () => {
         if (!await confirmar(`Excluir a parede P${s.i + 1}?`)) return;
         if (removerParede(e, s.i, a)) { tocar(); selecionar(null); } else toast('No meio do desenho, remova um ponto ou divida a parede.');
@@ -1142,6 +1159,36 @@ function vEsboco() {
       document.getElementById('eOx').onclick = () => { e.aberturas.splice(s.i, 1); tocar(); selecionar(null); };
       document.getElementById('eOk').onclick = () => selecionar(null);
     }
+  };
+  // Vão medido em 3 alturas (alto, meio, baixo): a parede fica com a MENOR medida, que é a que o móvel cabe.
+  const barraTres = i => {
+    const w = e.walls[i], bar = document.getElementById('ebar'); w.tres ??= [null, null, null]; w.tresO ??= [null, null, null];
+    const NOMES = ['Alto', 'Meio', 'Baixo'];
+    bar.innerHTML = `<b>P${i + 1} · 3 pts</b>${NOMES.map((n, j) => `<label class="mini">${n}<input data-t="${j}" inputmode="decimal" value="${w.tres[j] != null ? Math.round(w.tres[j]) : ''}"></label>`).join('')}<button class="small btn2" id="eOk" aria-label="Fechar">${ic('ok')}</button><div class="linha2"><span id="eTresR" class="muted"></span></div>`;
+    const res = () => {
+      const r = tresInfo(w), el = document.getElementById('eTresR'); if (!el) return;
+      el.innerHTML = r ? `Menor: <b>${fL(r.min)}</b> · diferença ${fL(r.dif)} ${r.dif > 5 ? '<b style="color:var(--bad)">— parede fora de prumo, use a menor</b>' : '<span style="color:var(--ok)">ok</span>'}` : 'Meça em cima, no meio e embaixo. A parede fica com a menor medida.';
+    };
+    const fim = () => { const r = tresInfo(w); if (!r) return; w.mm = r.min; w.o = w.tresO.every(x => x === 'laser') ? 'laser' : 'manual'; if (r.dif > 5) toast(`P${i + 1}: diferença de ${fL(r.dif)} entre as alturas.`, 3000); };
+    const inps = [...bar.querySelectorAll('[data-t]')];
+    const focar = j => { inps.forEach(x => x.classList.remove('alvo')); const inp = inps[j]; inp.classList.add('alvo'); alvo = { inp, aplicar: val => { inp.value = Math.round(val); grava(j, val, 'laser'); const nx = w.tres.findIndex(x => x == null); if (nx >= 0) focar(nx); } }; };
+    const grava = (j, val, o) => { w.tres[j] = val; w.tresO[j] = val == null ? null : o; fim(); tocar(); desenha(); res(); };
+    inps.forEach((inp, j) => { inp.onfocus = () => focar(j); inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(j, isNaN(val) ? null : val, 'manual'); }; });
+    focar(Math.max(0, w.tres.findIndex(x => x == null))); res();
+    document.getElementById('eOk').onclick = () => selecionar({ t: 'w', i });
+  };
+  // Esquadro: com as duas diagonais medidas, a diferença entre elas mostra se o cômodo está fora de esquadro.
+  const barraEsquadro = () => {
+    selecionar(null); mostraDiag = true; desenha(); e.diag ??= { d1: null, o1: null, d2: null, o2: null };
+    const bar = document.getElementById('ebar'); bar.hidden = false;
+    bar.innerHTML = `<b>Esquadro</b><label class="mini">D1 (1→3)<input data-d="1" inputmode="decimal" value="${e.diag.d1 != null ? Math.round(e.diag.d1) : ''}"></label><label class="mini">D2 (2→4)<input data-d="2" inputmode="decimal" value="${e.diag.d2 != null ? Math.round(e.diag.d2) : ''}"></label><button class="small btn2" id="eOk" aria-label="Fechar">${ic('ok')}</button><div class="linha2"><span id="eEsqR" class="muted"></span></div>`;
+    const res = () => { const el = document.getElementById('eEsqR'); if (el) el.innerHTML = esquadroTxt(e, true); };
+    const inps = [...bar.querySelectorAll('[data-d]')];
+    const grava = (n, val, o) => { e.diag['d' + n] = val; e.diag['o' + n] = val == null ? null : o; tocar(); res(); };
+    const focar = j => { inps.forEach(x => x.classList.remove('alvo')); const inp = inps[j]; inp.classList.add('alvo'); alvo = { inp, aplicar: val => { inp.value = Math.round(val); grava(j + 1, val, 'laser'); if (j === 0 && e.diag.d2 == null) focar(1); } }; };
+    inps.forEach((inp, j) => { inp.onfocus = () => focar(j); inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(j + 1, isNaN(val) ? null : val, 'manual'); }; });
+    focar(e.diag.d1 == null || e.diag.d2 != null ? 0 : 1); res(); dica('Meça as diagonais azuis, de canto a canto');
+    document.getElementById('eOk').onclick = () => { mostraDiag = false; dica(''); selecionar(null); };
   };
   const setModo = m => {
     modo = m; previa = null; const b = document.getElementById('eDes');
@@ -1210,6 +1257,7 @@ function vEsboco() {
     d.innerHTML = `<b>${esc(e.nome)}</b><div style="display:grid;gap:8px;margin-top:10px">
       <button id="m3dV">${ic('cubo')} Ver em 3D</button>
       <button class="btn2" id="mInfo">${ic('info')} Informações e DXF</button>
+      <button class="btn2" id="mEsq">${ic('esquadro')} Conferir esquadro (diagonais)</button>
       <button class="btn2" id="mTxt">${ic('texto')} Adicionar texto na planta</button>
       <button class="btn2" id="mNota">${ic('nota')} ${e.nota ? 'Editar nota da planta' : 'Nota da planta'}</button>
       <button class="btn2" id="mImp">${ic('baixar')} Importar planta (DXF, PDF ou imagem)</button>
@@ -1222,6 +1270,7 @@ function vEsboco() {
     q('#m3dV').onclick = () => { d.close(); ir({ v: '3d', p: rota.p, a: rota.a, e: e.id }); };
     q('#mF').onclick = () => d.close();
     q('#mInfo').onclick = () => { d.close(); infoEsboco(a, e); };
+    q('#mEsq').onclick = () => { d.close(); if (e.fechado && nParedes(e) === 4) { setModo('editar'); barraEsquadro(); } else aviso('Conferir esquadro', 'A conferência pelas diagonais vale para cômodos fechados de 4 paredes. Feche a planta com 4 cantos para usar.'); };
     q('#mTxt').onclick = () => { d.close(); modoEsp('texto', 'Toque onde quer colocar o texto'); };
     q('#mNota').onclick = () => { d.close(); editarNotaEsboco(e, mostrarNota); };
     q('#mImp').onclick = () => { d.close(); escolherArquivo('.dxf,.pdf,application/pdf,image/*', async file => { const r = await importarPlanta(a, e, file); if (!r) return; await carregarUrls(a); ir({ v: 'esb', p: rota.p, a: rota.a, e: e.id, escala: r === 'imagem' }); }); };
@@ -1241,6 +1290,11 @@ function remapear(a, e, fn) {
   for (const o of e.aberturas) { const r = fn(+o.parede, null, o); if (r == null) o._x = true; else { o.parede = r.w; if (r.dist != null) o.dist = r.dist; } }
   e.aberturas = e.aberturas.filter(o => !o._x);
   for (const f of a.fotos) if (f.liga?.e === e.id) { const r = fn(f.liga.w, f.liga.t); if (r == null) delete f.liga; else { f.liga.w = r.w; if (r.t != null) f.liga.t = r.t; } }
+  // pontos da vista da parede (tomadas, água…) acompanham a parede; a distância continua contada da esquerda
+  for (const pt of e.pontos || []) { const r = fn(+pt.parede, 0.5); if (r == null) pt._x = true; else pt.parede = r.w; }
+  if (e.pontos) e.pontos = e.pontos.filter(pt => !pt._x);
+  // a planta mudou de forma: medidas em 3 pontos e diagonais deixam de valer só se a parede sumir
+  if (e.diag && !(e.fechado && nParedes(e) === 4)) delete e.diag;
 }
 function dividirParede(e, i, a) {
   const g = esbGeo(e), L = g.len[i], M = pontoParede(g, i, 0.5);
@@ -1303,6 +1357,7 @@ function infoEsboco(a, e) {
     <tr><td>Área bruta da parede</td><td class="num">${m2(I.bruta)}</td></tr>
     <tr><td>Área líquida da parede</td><td class="num">${m2(I.liquida)}</td></tr>
     <tr><td>Volume do cômodo</td><td class="num">${m3(I.volume)}</td></tr>
+    ${e.diag ? `<tr><td>Esquadro (diagonais)</td><td class="num">${esquadroTxt(e)}</td></tr>` : ''}
     <tr><td>Fechamento da planta</td><td class="num" style="color:${g.fech == null ? 'inherit' : g.fech < 30 ? 'var(--ok)' : 'var(--bad)'}">${g.fech == null ? '–' : fmm(g.fech)}</td></tr>
     <tr><td>Paredes medidas</td><td class="num">${g.est.filter(x => !x).length} de ${g.n}</td></tr>
     <tr><td>Portas / janelas</td><td class="num">${e.aberturas.filter(o => o.tipo === 'porta').length} / ${e.aberturas.filter(o => o.tipo !== 'porta').length}</td></tr>
@@ -2180,7 +2235,7 @@ async function importarScanArquivo(a, f) {
 }
 
 /* ===================== Sobre ===================== */
-const COMPILADO = '2026-10-28';
+const COMPILADO = '2026-10-30';
 async function vSobre() {
   const n = resumoEstado(S), chave = (await caches.keys().catch(() => [])).find(k => k.startsWith('nycxo-medida-')) || 'sem cache';
   app.innerHTML = `<div class="card sobre"><div class="row" style="gap:12px"><div class="list-item ico" style="flex:0 0 52px;height:52px;margin:0;padding:0;justify-content:center;cursor:default"><span class="logo" style="display:inline-block;width:28px;height:28px;border-radius:9px;background:var(--tx)"></span></div><div class="grow" style="flex:1"><b style="font-size:17px">NYCXO Medida</b><div class="muted">Versão ${VERSAO_APP} · ferramenta de apoio do NYCXO</div></div></div>
@@ -2194,7 +2249,7 @@ async function vSobre() {
 /* ===================== Configurações ===================== */
 const CFG_PADRAO = {
   unid: 'mm', dec: 0, empresa: '', logo: null, usarLogo: true,
-  pdf: { cliente: true, planta: true, info: true, paredes: true, fotos: true, notas: true, leituras: false },
+  pdf: { cliente: true, planta: true, info: true, paredes: true, elevacao: true, checklist: true, fotos: true, notas: true, leituras: false },
   fotosPag: 2, qualidade: 'media', espessura: 100, porta: { larg: 900, alt: 2110 }, janela: { larg: 1000, alt: 1000, peit: 1000 }
 };
 function normalizarCfg() {
@@ -2225,7 +2280,7 @@ function vCfg() {
     <div><label>Casas decimais</label><select id="cDec">${[0, 1, 2, 3].map(n => `<option ${c.dec === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>
    <p class="muted">Exemplo: <b>${fL(2335.4)}</b>. As medidas continuam sendo digitadas em mm.</p></div>
   <div class="card"><b>Incluir no PDF</b>
-   ${chk('cliente', 'Dados do cliente')}${chk('planta', 'Planta com cotas')}${chk('info', 'Informações do cômodo')}${chk('paredes', 'Lista de paredes, portas e janelas')}${chk('fotos', 'Fotos com medidas')}${chk('notas', 'Notas')}${chk('leituras', 'Leituras do laser')}
+   ${chk('cliente', 'Dados do cliente')}${chk('planta', 'Planta com cotas')}${chk('info', 'Informações do cômodo')}${chk('paredes', 'Lista de paredes, portas e janelas')}${chk('elevacao', 'Vista das paredes (tomadas, água, gás…)')}${chk('checklist', 'Checklist da medição')}${chk('fotos', 'Fotos com medidas')}${chk('notas', 'Notas')}${chk('leituras', 'Leituras do laser')}
    <div class="row"><div><label>Fotos por página</label><select id="cFp">${[1, 2, 4].map(n => `<option ${c.fotosPag === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
     <div><label>Qualidade da imagem</label><select id="cQ">${[['baixa', 'Baixa'], ['media', 'Média'], ['alta', 'Alta']].map(([v, l]) => `<option value="${v}" ${c.qualidade === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div></div>
   <div class="card"><b>Medidas padrão de aberturas (mm)</b>
@@ -2447,6 +2502,172 @@ function moverFundo(e, orig, dx, dy) {
 }
 const blobsDaArea = a => [...a.fotos, ...(a.scans || []), ...a.esbocos.filter(e => e.fundo?.img).map(e => ({ id: e.fundo.img }))];
 
+/* ===================== Medidas de conferência: 3 pontos e esquadro ===================== */
+function tresInfo(w) {
+  const v = (w?.tres || []).filter(x => x != null); if (v.length < 3) return null;
+  const min = Math.min(...v); return { min, max: Math.max(...v), dif: Math.max(...v) - min };
+}
+// Diferença entre as diagonais: até 5 mm bom, até 10 mm atenção, acima disso fora de esquadro.
+function esquadroInfo(e) {
+  const d = e.diag; if (!d || d.d1 == null || d.d2 == null) return null;
+  const dif = Math.abs(d.d1 - d.d2);
+  return { d1: d.d1, d2: d.d2, dif, nivel: dif <= 5 ? 'ok' : dif <= 10 ? 'atencao' : 'fora' };
+}
+function esquadroTxt(e, html) {
+  const r = esquadroInfo(e);
+  if (!r) return html ? 'Meça D1 e D2 com o laser.' : 'incompleto';
+  const txt = { ok: 'no esquadro', atencao: 'atenção', fora: 'fora de esquadro' }[r.nivel];
+  if (!html) return `dif. ${fL(r.dif)} · ${txt}`;
+  const cor = { ok: 'var(--ok)', atencao: 'var(--warn)', fora: 'var(--bad)' }[r.nivel];
+  return `Diferença entre diagonais: <b style="color:${cor}">${fL(r.dif)} — ${txt}</b>`;
+}
+
+/* ===================== Vista da parede (elevação) com pontos elétricos e hidráulicos ===================== */
+// Cada ponto: { id, tipo, parede, x (mm da ESQUERDA, olhando a parede de dentro do cômodo), h (mm do piso), obs, o }
+const TIPOS_PONTO = {
+  tomada: ['Tomada', '#e4572e', 'T', 300], interruptor: ['Interruptor', '#7b4fd6', 'I', 1100], agua: ['Água', '#2f6fd6', 'A', 600],
+  esgoto: ['Esgoto', '#6f675b', 'E', 500], gas: ['Gás', '#e0a100', 'G', 600], ar: ['Ar-cond.', '#1f9d6b', 'AC', 2200], outro: ['Outro', '#1d1b18', '•', 1000]
+};
+const PE_DIREITO_PADRAO = 2600;
+function elevGeo(e, i) {
+  const g = esbGeo(e), L = g.len[i] || 1, n = normalFora(g, i), d = g.dir[i];
+  // olhando para a parede de dentro (na direção da normal para fora), a direita é (-ny, nx) com y para baixo
+  const esq = d[0] * -n[1] + d[1] * n[0] >= 0; // canto i fica à esquerda
+  const H = e.altura != null ? +e.altura : PE_DIREITO_PADRAO;
+  return { g, L, H, conhecido: e.altura != null, esq, X: dist => esq ? dist : L - dist, cantoE: esq ? i + 1 : (i + 1) % g.n + 1 };
+}
+function svgParede(e, i, k, op = {}) {
+  const G = elevGeo(e, i), { L, H } = G, out = [], fs = 11 * k, sw = 2.4 * k;
+  out.push(`<rect x="0" y="${-H}" width="${L}" height="${H}" fill="#fbf8f2" stroke="#1d1b18" stroke-width="${sw}" ${G.conhecido ? '' : `stroke-dasharray="${8 * k} ${5 * k}"`}/>`);
+  out.push(`<line x1="${-L * 0.06 - 200}" y1="0" x2="${L * 1.06 + 200}" y2="0" stroke="#1d1b18" stroke-width="${sw * 1.4}"/>`);
+  // portas e janelas desta parede (dist é contada do canto i; na vista, da esquerda)
+  e.aberturas.forEach(o => {
+    if (+o.parede !== i) return;
+    const xa = G.X(+o.dist || 0), xb = G.X((+o.dist || 0) + (+o.larg || 0)), x = Math.min(xa, xb), w = Math.abs(xb - xa), p = o.tipo === 'porta' ? 0 : +o.peit || 0, h = +o.alt || 0;
+    out.push(`<rect x="${x}" y="${-(p + h)}" width="${w}" height="${h}" fill="${o.tipo === 'porta' ? '#fff' : '#e3efed'}" stroke="${o.tipo === 'porta' ? '#857c6f' : '#0f5e59'}" stroke-width="${1.4 * k}"/>`);
+    out.push(textoSvg(x + w / 2, -(p + h / 2), `${o.tipo === 'porta' ? 'Porta' : 'Janela'}\n${fN(w)} × ${fN(h)}`, fs * 0.9, '', '#5f584e'));
+  });
+  // cotas gerais: comprimento embaixo e pé-direito à esquerda
+  out.push(`<line x1="0" y1="${40 * k}" x2="${L}" y2="${40 * k}" stroke="#1d1b18" stroke-width="${k}"/><line x1="0" y1="${30 * k}" x2="0" y2="${50 * k}" stroke="#1d1b18" stroke-width="${k}"/><line x1="${L}" y1="${30 * k}" x2="${L}" y2="${50 * k}" stroke="#1d1b18" stroke-width="${k}"/>`);
+  out.push(textoSvg(L / 2, 40 * k + fs * 1.6, `P${i + 1} · ${fN(L)}`, fs, ""));
+  out.push(`<g transform="translate(${-40 * k} ${-H / 2}) rotate(-90)">${textoSvg(0, fs * 0.4, `${G.conhecido ? '' : '≈ '}pé-direito ${fN(H)}`, fs, '', G.conhecido ? '#1d1b18' : '#a39a8c')}</g>`);
+  out.push(textoSvg(0, -H - 16 * k, `canto ${G.cantoE}`, fs * 0.85, '', '#857c6f'));
+  // pontos
+  (e.pontos || []).forEach(pt => {
+    if (+pt.parede !== i) return;
+    const T = TIPOS_PONTO[pt.tipo] || TIPOS_PONTO.outro, x = +pt.x || 0, y = -(+pt.h || 0), r = 10 * k, sel = op.sel === pt.id;
+    out.push(`<line x1="${x}" y1="0" x2="${x}" y2="${y}" stroke="${T[1]}" stroke-width="${0.9 * k}" stroke-dasharray="${3 * k} ${3 * k}" opacity=".7"/>`);
+    out.push(`<line x1="0" y1="${y}" x2="${x}" y2="${y}" stroke="${T[1]}" stroke-width="${0.9 * k}" stroke-dasharray="${3 * k} ${3 * k}" opacity=".7"/>`);
+    out.push(textoSvg(x / 2, y - 5 * k, fN(x), fs * 0.85, '', T[1]));
+    out.push(`<g transform="translate(${x + 5 * k} ${y / 2}) rotate(-90)">${textoSvg(0, 0, fN(-y), fs * 0.85, '', T[1])}</g>`);
+    out.push(`<g data-pt="${pt.id}"><circle cx="${x}" cy="${y}" r="${r * 2.2}" fill="transparent"/><circle cx="${x}" cy="${y}" r="${r}" fill="${T[1]}" stroke="${sel ? '#1d1b18' : '#fff'}" stroke-width="${(sel ? 3 : 1.5) * k}"/>
+      <text x="${x}" y="${y + r * 0.38}" font-size="${r * (T[2].length > 1 ? 0.85 : 1.1)}" text-anchor="middle" font-weight="700" fill="${pt.tipo === 'gas' ? '#1d1b18' : '#fff'}">${T[2]}</text></g>`);
+    if (pt.obs) out.push(textoSvg(x, y + r + fs * 1.2, pt.obs.slice(0, 30), fs * 0.8, '', '#3a3631'));
+  });
+  return out.join('');
+}
+function vParede() {
+  const a = area(), e = a.esbocos.find(x => x.id === rota.e), i = rota.w;
+  if (!e || i >= esbGeo(e).n) return ir({ v: 'area', p: rota.p, a: rota.a });
+  e.pontos ??= [];
+  const G = elevGeo(e, i);
+  app.innerHTML = `
+  <div class="ftool"><span class="muted" style="flex:1">Vista de dentro do cômodo · distâncias da esquerda</span>${KIT_ZOOM}</div>
+  <div class="ftool" style="overflow-x:auto;flex-wrap:nowrap">${Object.entries(TIPOS_PONTO).map(([k, T]) => `<button class="small btn2" data-novo="${k}" style="flex:0 0 auto"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${T[1]}"></span>${T[0]}</button>`).join('')}</div>
+  <div class="board" style="height:calc(100dvh - 250px - env(safe-area-inset-top) - env(safe-area-inset-bottom))"><svg id="psvg" class="vsvg esb"><g class="cam"></g></svg><div class="fdica" id="pdica" ${G.conhecido ? 'hidden' : ''}>Pé-direito não medido: usando ${fL(PE_DIREITO_PADRAO)}</div></div>
+  <div id="pbar" class="fbar" hidden></div>`;
+  const svg = document.getElementById('psvg'), cam = svg.querySelector('g.cam');
+  let sel = null;
+  const desenha = () => { cam.innerHTML = svgParede(e, i, v.k, { sel: sel?.id }); };
+  const lim = pt => { pt.x = Math.max(0, Math.min(G.L, Math.round(pt.x / 10) * 10)); pt.h = Math.max(0, Math.min(G.H, Math.round(pt.h / 10) * 10)); };
+  const v = new Vista(svg, {
+    mudou: desenha,
+    onDown: (w, tgt) => {
+      const el = tgt.closest?.('[data-pt]'); if (!el) return null;
+      const pt = e.pontos.find(x => x.id === el.dataset.pt), x0 = pt.x, h0 = pt.h;
+      return {
+        move: (w2, m) => { if (!m) return; pt.x = x0 + w2[0] - w[0]; pt.h = h0 - (w2[1] - w[1]); lim(pt); sel = pt; desenha(); },
+        up: (_, m) => { if (m) { pt.o = 'manual'; tocar(); } selecionar(pt); }
+      };
+    },
+    onTap: () => { if (sel) selecionar(null); }
+  });
+  const selecionar = pt => {
+    sel = pt; desenha(); const bar = document.getElementById('pbar'); alvo = null;
+    if (!pt) { bar.hidden = true; return; }
+    const T = TIPOS_PONTO[pt.tipo] || TIPOS_PONTO.outro; bar.hidden = false;
+    bar.innerHTML = `<b style="color:${T[1]}">${T[0]}</b><label class="mini">Da esquerda<input data-c="x" inputmode="decimal" value="${Math.round(pt.x)}"></label><label class="mini">Altura<input data-c="h" inputmode="decimal" value="${Math.round(pt.h)}"></label>
+      <button class="small btn2" id="pObs" aria-label="Observação">${ic('nota')}</button><button class="small btnbad" id="pX" aria-label="Excluir">${ic('lixo')}</button><button class="small btn2" id="pOk" aria-label="Fechar">${ic('ok')}</button>`;
+    const inps = [...bar.querySelectorAll('[data-c]')];
+    const grava = (c, val, o) => { if (val == null) return; pt[c] = val; pt.o = o; lim(pt); tocar(); desenha(); };
+    const focar = j => { inps.forEach(x => x.classList.remove('alvo')); const inp = inps[j]; inp.classList.add('alvo'); alvo = { inp, aplicar: val => { grava(inp.dataset.c, val, 'laser'); inp.value = Math.round(pt[inp.dataset.c]); if (j === 0) focar(1); } }; };
+    inps.forEach((inp, j) => { inp.onfocus = () => focar(j); inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(inp.dataset.c, isNaN(val) ? null : val, 'manual'); inp.value = Math.round(pt[inp.dataset.c]); }; });
+    focar(0);
+    document.getElementById('pObs').onclick = async () => { const r = await pedir(`${T[0]} — observação`, 'Ex.: 220V, dupla, 20A, saída de 3/4"…', pt.obs || ''); pt.obs = r || ''; tocar(); selecionar(pt); };
+    document.getElementById('pX').onclick = () => { e.pontos = e.pontos.filter(x => x !== pt); tocar(); selecionar(null); };
+    document.getElementById('pOk').onclick = () => selecionar(null);
+  };
+  app.querySelectorAll('[data-novo]').forEach(b => b.onclick = () => {
+    const T = TIPOS_PONTO[b.dataset.novo], pt = { id: uid(), tipo: b.dataset.novo, parede: i, x: Math.round(G.L / 2 / 10) * 10, h: Math.min(T[3], G.H), obs: '', o: null };
+    e.pontos.push(pt); tocar(); selecionar(pt); toast('Meça a distância da esquerda e depois a altura.');
+  });
+  const ajustar = () => { const m = Math.max(G.L, G.H) * 0.1 + 250; v.enquadrar({ x: -m, y: -G.H - m, w: G.L + 2 * m, h: G.H + 2 * m }, 0.02); };
+  ligarZoom(app, v, ajustar); ajustar();
+}
+async function paredePNG(e, i, W = 1800) {
+  const G = elevGeo(e, i), m = Math.max(G.L, G.H) * 0.08 + 250, X = -m, Y = -G.H - m, Wd = G.L + 2 * m, Hd = G.H + 2 * m, k = Math.max(Wd, Hd) / 700;
+  const H = Math.round(W * Hd / Wd);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${X} ${Y} ${Wd} ${Hd}" font-family="Helvetica, Arial, sans-serif"><rect x="${X}" y="${Y}" width="${Wd}" height="${Hd}" fill="#ffffff"/>${svgParede(e, i, k)}</svg>`;
+  const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode();
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H);
+  return { url: c.toDataURL('image/png'), w: W, h: H };
+}
+const paredesComVista = e => { const n = esbGeo(e).n, s = new Set([...(e.pontos || []).map(p => +p.parede)]); return [...Array(n).keys()].filter(i => s.has(i)); };
+
+/* ===================== Checklist da medição (por ambiente) ===================== */
+// Itens automáticos saem dos dados; os outros o medidor marca como feito ou "não se aplica".
+const CHECK_AUTO = [
+  ['paredes', 'Todas as paredes medidas', a => a.esbocos.length > 0 && a.esbocos.every(e => esbGeo(e).todasMedidas)],
+  ['pe', 'Pé-direito medido', a => a.esbocos.length > 0 && a.esbocos.every(e => e.altura != null)],
+  ['esq', 'Esquadro conferido (diagonais)', a => { const q = a.esbocos.filter(e => e.fechado && nParedes(e) === 4); return q.length > 0 && q.every(e => esquadroInfo(e)); }]
+];
+const CHECK_ITENS = [
+  ['prumo', 'Prumo das paredes conferido'], ['nivel', 'Nível do piso conferido'],
+  ['eletrica', 'Tomadas e interruptores marcados'], ['hidraulica', 'Pontos de água e esgoto marcados'], ['gas', 'Ponto de gás'],
+  ['ar', 'Ar-condicionado e dreno'], ['rodape', 'Rodapé: altura e se vai ficar'], ['forro', 'Forro, sanca e cortineiro'],
+  ['interf', 'Interferências: vigas, pilares, canos, quadro de luz'], ['janelas', 'Janelas: peitoril, abertura e persiana'],
+  ['portas', 'Portas: sentido de abertura e guarnição'], ['eletro', 'Eletrodomésticos: modelo e medidas'],
+  ['piso', 'Piso ou revestimento ainda vai mudar?'], ['fotos', 'Fotos de todas as paredes'], ['acesso', 'Acesso para entrega (elevador, escada, porta)']
+];
+function checkProgresso(a) {
+  const c = a.check || {};
+  const feito = CHECK_AUTO.filter(([, , f]) => f(a)).length + CHECK_ITENS.filter(([k]) => c[k]?.s).length;
+  return { feito, total: CHECK_AUTO.length + CHECK_ITENS.length };
+}
+function dicaCheck(a, k) {
+  const pts = a.esbocos.flatMap(e => e.pontos || []), n = t => pts.filter(p => t.includes(p.tipo)).length;
+  if (k === 'eletrica') return n(['tomada', 'interruptor']) ? `${n(['tomada', 'interruptor'])} ponto(s) nas vistas das paredes` : '';
+  if (k === 'hidraulica') return n(['agua', 'esgoto']) ? `${n(['agua', 'esgoto'])} ponto(s) nas vistas das paredes` : '';
+  if (k === 'gas') return n(['gas']) ? `${n(['gas'])} ponto(s) marcado(s)` : '';
+  if (k === 'ar') return n(['ar']) ? `${n(['ar'])} ponto(s) marcado(s)` : '';
+  if (k === 'fotos') return `${a.fotos.length} foto(s) na área`;
+  return '';
+}
+function vChecklist() {
+  const a = area(); a.check ??= {};
+  const pr = checkProgresso(a);
+  app.innerHTML = `
+  <div class="card"><div class="row"><b style="flex:1">Checklist da medição</b><b class="num">${pr.feito}/${pr.total}</b></div>
+   <p class="muted" style="margin:6px 0 0">Antes de sair da obra, confira cada item. Os 3 primeiros são marcados sozinhos pelas medidas.</p></div>
+  <div class="card">${CHECK_AUTO.map(([k, l, f]) => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${l}</span><b style="flex:0 0 auto;color:${f(a) ? 'var(--ok)' : 'var(--mut)'}">${f(a) ? '✓ feito' : 'pendente'}</b></div>`).join('')}</div>
+  <div class="card">${CHECK_ITENS.map(([k, l]) => { const it = a.check[k] || {}, d = dicaCheck(a, k); return `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+    <div class="row"><span style="flex:1">${l}${d ? `<br><span class="muted">${d}</span>` : ''}</span>
+     <div class="seg" style="flex:0 0 auto"><button data-k="${k}" data-s="ok" class="${it.s === 'ok' ? 'on' : ''}" style="--c:var(--ok)">Feito</button><button data-k="${k}" data-s="na" class="${it.s === 'na' ? 'on' : ''}" style="--c:var(--mut)">N/A</button></div></div>
+    <input data-obs="${k}" placeholder="Observação" value="${esc(it.obs || '')}" style="margin-top:6px;padding:7px 10px;font-size:16px"></div>`; }).join('')}</div>`;
+  app.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { const it = a.check[b.dataset.k] ??= {}; it.s = it.s === b.dataset.s ? null : b.dataset.s; tocar(); render(); });
+  app.querySelectorAll('[data-obs]').forEach(i => i.onchange = () => { const it = a.check[i.dataset.obs] ??= {}; it.obs = i.value.trim(); tocar(); });
+}
+
 /* ===================== Relatório PDF por ambiente ===================== */
 // texto para as fontes padrão do PDF (Latin-1)
 const san = s => String(s ?? '').replace(/≈/g, '~').replace(/[✓✔✎⇩]/g, '').replace(/[–—]/g, '-').replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/…/g, '...').replace(/[^\x00-\xFF]/g, '');
@@ -2537,14 +2758,28 @@ async function gerarPDF(p, soArea) {
       }
       if (c.pdf.paredes && g.n) {
         titulo('Paredes', 11);
-        for (let i = 0; i < g.n; i++) kv(`P${i + 1}`, `${fL(g.len[i])} · ${g.est[i] ? 'estimada' : ORIG_TXT[e.walls[i]?.o] || 'digitada'}`);
+        for (let i = 0; i < g.n; i++) { const t3 = tresInfo(e.walls[i]); kv(`P${i + 1}`, `${fL(g.len[i])} · ${g.est[i] ? 'estimada' : ORIG_TXT[e.walls[i]?.o] || 'digitada'}${t3 ? ` · 3 pts ${e.walls[i].tres.map(fN).join(' / ')} (dif. ${fL(t3.dif)})` : ''}`); }
+        if (e.diag) kv('Esquadro (D1 / D2)', `${fL(e.diag.d1)} / ${fL(e.diag.d2)} · ${esquadroTxt(e)}`);
         e.aberturas.forEach((o, j) => kv(`${o.tipo === 'porta' ? 'Porta' : 'Janela'} ${j + 1} · parede P${+o.parede + 1}`, `${fL(o.larg)} x ${fL(o.alt)}${o.tipo !== 'porta' ? ' · peitoril ' + fL(o.peit) : ''} · a ${fL(o.dist)} do canto`));
+        y += 3;
+      }
+      if (c.pdf.elevacao) for (const i of paredesComVista(e)) {
+        titulo(`Parede P${i + 1} — vista de dentro`, 11);
+        const im = await paredePNG(e, i).catch(() => null);
+        if (im) { let w = CW, h = CW * im.h / im.w; if (h > 110) { h = 110; w = h * im.w / im.h; } precisa(h + 4); doc.addImage(im.url, 'PNG', M + (CW - w) / 2, y, w, h); y += h + 4; }
+        e.pontos.filter(pt => +pt.parede === i).sort((p1, p2) => p1.x - p2.x).forEach(pt => kv(`${(TIPOS_PONTO[pt.tipo] || TIPOS_PONTO.outro)[0]}${pt.obs ? ' · ' + pt.obs : ''}`, `${fL(pt.x)} da esquerda · altura ${fL(pt.h)}`));
         y += 3;
       }
       if (c.pdf.notas) {
         if (e.nota) { titulo('Nota da planta', 11); texto(e.nota); }
         if ((e.textos || []).length) { titulo('Textos na planta', 11); e.textos.forEach(t => texto('• ' + t.t.replace(/\n/g, ' '))); }
       }
+    }
+    if (c.pdf.checklist && (a.check && Object.keys(a.check).length || a.esbocos.length)) {
+      const pr = checkProgresso(a); titulo(`Checklist da medição · ${pr.feito}/${pr.total}`, 12);
+      CHECK_AUTO.forEach(([, l, f]) => kv(l, f(a) ? 'feito' : 'pendente'));
+      CHECK_ITENS.forEach(([k, l]) => { const it = a.check?.[k] || {}; kv(l, (it.s === 'ok' ? 'feito' : it.s === 'na' ? 'não se aplica' : 'pendente') + (it.obs ? ' · ' + it.obs : '')); });
+      y += 3;
     }
     if (c.pdf.notas && a.notas.some(n => n.texto?.trim())) { titulo('Notas', 12); a.notas.filter(n => n.texto?.trim()).forEach(n => texto(n.texto)); }
     if (c.pdf.fotos && a.fotos.length) {

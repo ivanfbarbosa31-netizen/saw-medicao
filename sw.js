@@ -1,6 +1,6 @@
 // Cache para abrir e gerar PDF sem internet na obra.
 // Páginas e arquivos do app: rede primeiro, cache se estiver sem sinal. Bibliotecas de PDF (versão fixa): cache primeiro.
-const V = 'nycxo-medida-v5';
+const V = 'nycxo-medida-v6';
 const LOCAIS = ['./', 'index.html', 'manifest.json', 'icon.svg', 'apple-touch-icon.png', 'icon-512.png', 'importar-scan.js'];
 const LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
