@@ -490,6 +490,8 @@ const area = () => proj()?.areas.find(a => a.id === rota.a);
 function ir(r) { rota = r; alvo = null; render(); window.scrollTo(0, 0); }
 document.getElementById('voltar').onclick = () => {
   if (rota.v === 'cfg' || rota.v === 'sobre') return ir(rota.volta || { v: 'home' });
+  if (rota.v === 'planta') return ir({ v: 'proj', p: rota.p });
+  if (rota.v === 'esb' && rota.de === 'planta') return ir({ v: 'planta', p: rota.p });
   if (rota.v === '3d' || rota.v === 'parede') return ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
   if (rota.v === 'check') return ir({ v: 'area', p: rota.p, a: rota.a });
   if (rota.v === 'foto' && rota.de === 'esb') ir({ v: 'esb', p: rota.p, a: rota.a, e: rota.e });
@@ -502,7 +504,7 @@ document.getElementById('menu').onclick = menuGeral;
 
 async function render() {
   if (V3 && rota.v !== '3d') parar3D();
-  document.body.classList.toggle('travado', ['area', 'esb', 'foto', 'parede'].includes(rota.v));
+  document.body.classList.toggle('travado', ['area', 'esb', 'foto', 'parede', 'planta'].includes(rota.v));
   document.getElementById('voltar').style.display = rota.v === 'home' ? 'none' : '';
   const t = document.getElementById('titulo');
   if (rota.v === 'home') { t.innerHTML = '<span class="logo"></span><span class="marca">NYCXO <i>medida</i></span>'; vHome(); }
@@ -515,6 +517,7 @@ async function render() {
   else if (rota.v === '3d') { t.textContent = area().nome + ' · 3D'; await v3D(); }
   else if (rota.v === 'parede') { t.textContent = (area().esbocos.find(x => x.id === rota.e)?.nome || area().nome) + ` · parede P${rota.w + 1}`; vParede(); }
   else if (rota.v === 'check') { t.textContent = area().nome + ' · checklist'; vChecklist(); }
+  else if (rota.v === 'planta') { t.textContent = proj().nome + ' · planta completa'; vPlanta(); }
   else if (rota.v === 'foto') { t.textContent = area().nome + ' · foto'; await vFoto(); }
   renderChips();
 }
@@ -554,6 +557,7 @@ function vProj() {
   <details class="card"><summary><b>Dados do cliente</b></summary>
     ${CAMPOS.map(([k, l]) => `<label>${l}</label><input data-k="${k}" value="${esc(p.cliente[k])}">`).join('')}
   </details>
+  <button class="btn2" id="plantaP" style="width:100%;margin-bottom:8px">${ic('esquadro')} Planta completa (todos os ambientes)</button>
   <button id="pdfP" style="width:100%;margin-bottom:8px">${ic('baixar')} Gerar PDF do projeto</button>
   <div class="row"><button class="btn2" id="expP">Exportar projeto (backup)</button><button class="btn2" id="renP">Renomear</button></div>
   <div class="row" style="margin-top:8px"><button class="btnbad" id="delP">Excluir projeto</button></div>`;
@@ -574,9 +578,10 @@ function vProj() {
     S.projetos = S.projetos.filter(x => x !== p); await salvar(); toast('Projeto movido para a Lixeira.'); ir({ v: 'home' });
   };
   document.getElementById('expP').onclick = () => exportarProjeto(p);
+  document.getElementById('plantaP').onclick = () => ir({ v: 'planta', p: p.id });
   document.getElementById('pdfP').onclick = () => gerarPDF(p).catch(err => aviso('Erro ao gerar PDF', esc(err.message)));
 }
-function tocar() { const p = proj(); if (p) p.alt = Date.now(); salvar(); }
+function tocar() { const p = proj(); if (p) { p.alt = Date.now(); sincronizarUnioes(p); } salvar(); }
 
 /* ===================== Vista com zoom/arraste (base e editor de planta) ===================== */
 // SVG com um <g class="cam">: tela = mundo * S + t. Pinça/roda dão zoom; 1 dedo vai para onDown (ou move a vista).
@@ -703,12 +708,37 @@ function esbGeo(e) {
     const L = m != null ? +m : dl; len.push(L); est.push(m == null); dir.push([ux, uy]);
     P.push([P[i][0] + ux * L, P[i][1] + uy * L]);
   }
-  const per = len.reduce((s, v) => s + v, 0);
   let fech = null, area = null;
   if (e.fechado && n > 2) {
-    fech = Math.hypot(P[n][0] - P[0][0], P[n][1] - P[0][1]);
+    // planta fechada fica sempre fechada: as paredes ainda não medidas absorvem a diferença;
+    // com todas medidas, a diferença é distribuída pelo perímetro e informada como "fechamento"
+    const refaz = () => { for (let i = 0; i < n; i++) P[i + 1] = [P[i][0] + dir[i][0] * len[i], P[i][1] + dir[i][1] * len[i]]; };
+    const erro = () => [P[n][0] - P[0][0], P[n][1] - P[0][1]];
+    const m = erro(); fech = Math.hypot(m[0], m[1]);
+    if (fech > 0.5) {
+      const E = est.map((x, i) => x ? i : -1).filter(i => i >= 0);
+      if (E.length === 1) {
+        const k = E[0], V = [dir[k][0] * len[k] - m[0], dir[k][1] * len[k] - m[1]], L = Math.hypot(V[0], V[1]);
+        if (L > 10) { dir[k] = [V[0] / L, V[1] / L]; len[k] = L; refaz(); }
+      } else if (E.length > 1) {
+        let a = 0, b = 0, c = 0; for (const k of E) { a += dir[k][0] ** 2; b += dir[k][0] * dir[k][1]; c += dir[k][1] ** 2; }
+        const det = a * c - b * b;
+        if (Math.abs(det) > 1e-6) {
+          const l0 = (c * -m[0] - b * -m[1]) / det, l1 = (a * -m[1] - b * -m[0]) / det, novo = E.map(k => len[k] + dir[k][0] * l0 + dir[k][1] * l1);
+          if (novo.every(L => L > 10)) { E.forEach((k, j) => { len[k] = novo[j]; }); refaz(); }
+        }
+      }
+      const r = erro();
+      if (Math.hypot(r[0], r[1]) > 0.5) {
+        const tot = len.reduce((s, v) => s + v, 0) || 1; let acc = 0;
+        for (let i = 1; i <= n; i++) { acc += len[i - 1]; P[i] = [P[i][0] - r[0] * acc / tot, P[i][1] - r[1] * acc / tot]; }
+      } else fech = 0;
+      P[n] = P[0].slice();
+    }
+    fech = Math.round(fech * 10) / 10;
     let s = 0; for (let i = 0; i < n; i++) s += P[i][0] * P[i + 1][1] - P[i + 1][0] * P[i][1]; area = Math.abs(s / 2);
   }
+  const per = len.reduce((s, v) => s + v, 0);
   let sa = 0; for (let i = 0; i < n; i++) sa += P[i][0] * P[i + 1][1] - P[i + 1][0] * P[i][1];
   return { n, P, len, est, dir, per, fech, area, horario: sa > 0, todasMedidas: n > 0 && est.every(x => !x) };
 }
@@ -741,7 +771,8 @@ function svgEsboco(e, k, op = {}) {
     out.push(`<g class="cota" opacity="${sel ? 1 : 0.95}"><line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" stroke="${sel ? '#e4572e' : cor}" stroke-width="${k}"/>
       <line x1="${a[0] + nx * 8 * k}" y1="${a[1] + ny * 8 * k}" x2="${a[0] + nx * 28 * k}" y2="${a[1] + ny * 28 * k}" stroke="${cor}" stroke-width="${0.8 * k}"/>
       <line x1="${b[0] + nx * 8 * k}" y1="${b[1] + ny * 8 * k}" x2="${b[0] + nx * 28 * k}" y2="${b[1] + ny * 28 * k}" stroke="${cor}" stroke-width="${0.8 * k}"/>`);
-    let ang = Math.atan2(B[1] - A[1], B[0] - A[0]) * 180 / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+    // op.rot: giro do cômodo na planta completa; o texto fica sempre em pé na tela
+    const rg = op.rot || 0; let ang = Math.atan2(B[1] - A[1], B[0] - A[0]) * 180 / Math.PI + rg; ang = ((ang % 360) + 540) % 360 - 180; if (ang > 90) ang -= 180; if (ang < -90) ang += 180; ang -= rg;
     const mx = (A[0] + B[0]) / 2 + nx * 9 * k, my = (A[1] + B[1]) / 2 + ny * 9 * k, txt = `${tag} ${fN(g.len[i])}`;
     out.push(`<g transform="translate(${mx} ${my}) rotate(${ang})"><rect x="${-txt.length * fs * 0.32}" y="${-fs * 0.7}" width="${txt.length * fs * 0.64}" height="${fs * 1.4}" fill="${sel ? '#fde3d8' : '#fff'}" opacity=".9" rx="${2 * k}"/>
       <text y="${fs * 0.36}" font-size="${fs}" text-anchor="middle" fill="${sel ? '#e4572e' : cor}" font-weight="${g.est[i] ? 400 : 700}">${txt}</text></g></g>`);
@@ -769,8 +800,8 @@ function svgEsboco(e, k, op = {}) {
   // nome e área no centro
   if (g.n > 2 && e.fechado) {
     const cx = g.P.slice(0, g.n).reduce((s, p) => s + p[0], 0) / g.n, cy = g.P.slice(0, g.n).reduce((s, p) => s + p[1], 0) / g.n;
-    out.push(`<text x="${cx}" y="${cy}" font-size="${13 * k}" text-anchor="middle" font-weight="700" fill="#1d1b18">${esc(e.nome)}</text>`);
-    if (g.area) out.push(`<text x="${cx}" y="${cy + 15 * k}" font-size="${10 * k}" text-anchor="middle" fill="#857c6f">${m2(g.area)}</text>`);
+    out.push(`<g transform="rotate(${-(op.rot || 0)} ${cx} ${cy})"><text x="${cx}" y="${cy}" font-size="${13 * k}" text-anchor="middle" font-weight="700" fill="#1d1b18">${esc(e.nome)}</text>`);
+    out.push(`${g.area ? `<text x="${cx}" y="${cy + 15 * k}" font-size="${10 * k}" text-anchor="middle" fill="#857c6f">${m2(g.area)}</text>` : ''}</g>`);
   }
   // fotos ligadas às paredes (bolinhas com a miniatura)
   for (const f of op.fotos || []) {
@@ -1108,9 +1139,22 @@ function vEsboco() {
       }
       const h = perto(w); if (!h) return null;
       if (h.t === 'v') {
+        // ponta de planta aberta arrastada sobre a outra ponta: o ímã gruda e a planta fecha
+        const ult = e.pts.length - 1, ponta = !e.fechado && e.pts.length >= 3 && (h.i === 0 || h.i === ult);
+        const alvoJunta = ponta ? esbGeo(e).P[h.i === 0 ? nParedes(e) : 0].slice() : null;
+        let junta = false;
         return {
-          move: (w2, moveu) => { if (!moveu) return; consolidar(); const r = naMira(w2); mira = { f: w2, r }; e.pts[h.i] = [Math.round(r[0] / 10) * 10, Math.round(r[1] / 10) * 10]; sel = h; desenha(); },
-          up: (_, moveu) => { mira = null; if (moveu) tocar(); selecionar(h); }
+          move: (w2, moveu) => {
+            if (!moveu) return; consolidar(); const r = naMira(w2); mira = { f: w2, r };
+            junta = !!alvoJunta && Math.hypot(r[0] - alvoJunta[0], r[1] - alvoJunta[1]) < 28 * v.k;
+            e.pts[h.i] = junta ? alvoJunta.slice() : [Math.round(r[0] / 10) * 10, Math.round(r[1] / 10) * 10]; sel = h; desenha();
+            if (junta) gd.insertAdjacentHTML('beforeend', `<circle cx="${alvoJunta[0]}" cy="${alvoJunta[1]}" r="${16 * v.k}" fill="none" stroke="#0f5e59" stroke-width="${3 * v.k}"/>`);
+          },
+          up: (_, moveu) => {
+            mira = null; if (!moveu) return selecionar(h);
+            if (junta) { fecharPlanta(e, h.i, a); tocar(); toast('Pontos unidos: planta fechada.'); selecionar(null); desenha(); return; }
+            tocar(); selecionar(h);
+          }
         };
       }
       return { up: (_, moveu) => { if (!moveu) selecionar(h); } };
@@ -1290,12 +1334,22 @@ function remapear(a, e, fn) {
   for (const o of e.aberturas) { const r = fn(+o.parede, null, o); if (r == null) o._x = true; else { o.parede = r.w; if (r.dist != null) o.dist = r.dist; } }
   e.aberturas = e.aberturas.filter(o => !o._x);
   for (const f of a.fotos) if (f.liga?.e === e.id) { const r = fn(f.liga.w, f.liga.t); if (r == null) delete f.liga; else { f.liga.w = r.w; if (r.t != null) f.liga.t = r.t; } }
+  // uniões da planta completa acompanham a parede (ou se desfazem se ela sumir)
+  const pj = proj(); if (pj?.planta) pj.planta.unioes = pj.planta.unioes.filter(u => { for (const lado of [u.pai, u.filho]) if (lado.e === e.id) { const r = fn(lado.w, 0.5); if (r == null) return false; lado.w = r.w; } return true; });
   // pontos da vista da parede (tomadas, água…) acompanham a parede; a distância continua contada da esquerda
   for (const pt of [...(e.pontos || []), ...(e.fundosP || [])]) { const r = fn(+pt.parede, 0.5); if (r == null) pt._x = true; else pt.parede = r.w; }
   if (e.fundosP) e.fundosP = e.fundosP.filter(f => !f._x);
   if (e.pontos) e.pontos = e.pontos.filter(pt => !pt._x);
   // a planta mudou de forma: medidas em 3 pontos e diagonais deixam de valer só se a parede sumir
   if (e.diag && !(e.fechado && nParedes(e) === 4)) delete e.diag;
+}
+// Une as duas pontas de uma planta aberta (k = ponta arrastada). As paredes, portas e fotos ficam onde estavam.
+function fecharPlanta(e, k, a) {
+  const n = nParedes(e);
+  if (k === e.pts.length - 1) { e.pts.pop(); e.fechado = true; return; }
+  // a primeira ponta foi até a última: a parede 0 passa a ser a parede que fecha (última da lista)
+  e.pts.shift(); e.walls.push(e.walls.shift()); e.fechado = true;
+  remapear(a, e, w => ({ w: (w - 1 + n) % n }));
 }
 function dividirParede(e, i, a) {
   const g = esbGeo(e), L = g.len[i], M = pontoParede(g, i, 0.5);
@@ -1756,11 +1810,10 @@ function baixar(nome, data, tipo) {
 }
 // DXF AC1015 (R2000) ASCII, unidades em milímetros ($INSUNITS 4), só LINE, camadas PAREDE / PORTA / JANELA declaradas na tabela LAYER.
 const DXF_CAMADAS = [['0', 7], ['PAREDE', 7], ['PORTA', 3], ['JANELA', 5]];
-function dxf(e, tres) {
-  const g = esbGeo(e), H = +e.altura || 0, linhas = [];
-  const f = n => (Math.round(n * 1000) / 1000).toString();
-  // tela tem y para baixo; no CAD y é para cima
-  const P = g.P.map(([x, y]) => [x, -y]);
+function dxf(e, tres, tf, soSegs) {
+  const g = esbGeo(e), H = +e.altura || 0;
+  // tela tem y para baixo; no CAD y é para cima. tf: posição do cômodo na planta completa
+  const P = g.P.map(p => tf ? tf(p) : p).map(([x, y]) => [x, -y]);
   const segs = [];
   const line = (ly, p, q) => segs.push([ly, p, q]);
   for (let i = 0; i < g.n; i++) {
@@ -1777,6 +1830,11 @@ function dxf(e, tres) {
     if (tres) { line(ly, [...A, z1], [...B, z1]); line(ly, [...B, z1], [...B, z2]); line(ly, [...B, z2], [...A, z2]); line(ly, [...A, z2], [...A, z1]); }
     else { const nx = -uy * 100, ny = ux * 100; line(ly, A, B); line(ly, B, [B[0] + nx, B[1] + ny]); line(ly, [B[0] + nx, B[1] + ny], [A[0] + nx, A[1] + ny]); line(ly, [A[0] + nx, A[1] + ny], A); }
   }
+  return soSegs ? segs : dxfArquivo(segs);
+}
+// Arquivo DXF (AC1015, mm) a partir de segmentos [camada, p, q]
+function dxfArquivo(segs) {
+  const linhas = [], f = n => (Math.round(n * 1000) / 1000).toString();
   let h = 0x20; const H_ = () => (h++).toString(16).toUpperCase();
   const add = (...v) => linhas.push(...v.map(String));
   const hMS = H_(), hPS = H_(), hLay = H_(), hLt = H_(), hSt = H_(), hAp = H_(), hBr = H_(), hVp = H_(), hRoot = H_(), hGrp = H_();
@@ -2250,7 +2308,7 @@ async function vSobre() {
 /* ===================== Configurações ===================== */
 const CFG_PADRAO = {
   unid: 'mm', dec: 0, empresa: '', logo: null, usarLogo: true,
-  pdf: { cliente: true, planta: true, info: true, paredes: true, elevacao: true, checklist: true, fotos: true, notas: true, leituras: false },
+  pdf: { cliente: true, planta: true, info: true, paredes: true, elevacao: true, checklist: true, plantaCompleta: true, fotos: true, notas: true, leituras: false },
   fotosPag: 2, qualidade: 'media', espessura: 100, porta: { larg: 900, alt: 2110 }, janela: { larg: 1000, alt: 1000, peit: 1000 }
 };
 function normalizarCfg() {
@@ -2281,7 +2339,7 @@ function vCfg() {
     <div><label>Casas decimais</label><select id="cDec">${[0, 1, 2, 3].map(n => `<option ${c.dec === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>
    <p class="muted">Exemplo: <b>${fL(2335.4)}</b>. As medidas continuam sendo digitadas em mm.</p></div>
   <div class="card"><b>Incluir no PDF</b>
-   ${chk('cliente', 'Dados do cliente')}${chk('planta', 'Planta com cotas')}${chk('info', 'Informações do cômodo')}${chk('paredes', 'Lista de paredes, portas e janelas')}${chk('elevacao', 'Vista das paredes (tomadas, água, gás…)')}${chk('checklist', 'Checklist da medição')}${chk('fotos', 'Fotos com medidas')}${chk('notas', 'Notas')}${chk('leituras', 'Leituras do laser')}
+   ${chk('cliente', 'Dados do cliente')}${chk('plantaCompleta', 'Planta completa (ambientes unidos)')}${chk('planta', 'Planta com cotas')}${chk('info', 'Informações do cômodo')}${chk('paredes', 'Lista de paredes, portas e janelas')}${chk('elevacao', 'Vista das paredes (tomadas, água, gás…)')}${chk('checklist', 'Checklist da medição')}${chk('fotos', 'Fotos com medidas')}${chk('notas', 'Notas')}${chk('leituras', 'Leituras do laser')}
    <div class="row"><div><label>Fotos por página</label><select id="cFp">${[1, 2, 4].map(n => `<option ${c.fotosPag === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
     <div><label>Qualidade da imagem</label><select id="cQ">${[['baixa', 'Baixa'], ['media', 'Média'], ['alta', 'Alta']].map(([v, l]) => `<option value="${v}" ${c.qualidade === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div></div>
   <div class="card"><b>Medidas padrão de aberturas (mm)</b>
@@ -2753,6 +2811,220 @@ async function paredePNG(e, i, W = 1800) {
 }
 const paredesComVista = e => { const n = esbGeo(e).n, s = new Set([...(e.pontos || []).map(p => +p.parede), ...(e.fundosP || []).map(f => +f.parede), ...e.aberturas.map(o => +o.parede)]); return [...Array(n).keys()].filter(i => s.has(i)); };
 
+/* ===================== Planta completa do projeto: todos os ambientes unidos ===================== */
+// p.planta = { esp, itens: [{ e, x, y, rot }], unioes: [{ id, pai: { e, w }, filho: { e, w }, desl, igual, mm0 }] }
+// O cômodo "filho" de uma união é posicionado a partir da parede do "pai": mudou a medida, a planta acompanha.
+const ESP_PADRAO = 150;
+function esbocosDoProjeto(p) { return p.areas.flatMap(a => a.esbocos.filter(e => e.pts.length > 1).map(e => ({ a, e }))); }
+function acharEsboco(p, id) { for (const a of p.areas) { const e = a.esbocos.find(x => x.id === id); if (e) return { a, e }; } return null; }
+const rotV = (g, [x, y]) => { const r = g * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [x * c - y * s, x * s + y * c]; };
+function normalizarPlanta(p) {
+  const pl = p.planta ??= { esp: ESP_PADRAO, itens: [], unioes: [] };
+  pl.itens ??= []; pl.unioes ??= []; pl.esp ??= ESP_PADRAO;
+  const lista = esbocosDoProjeto(p), ids = new Set(lista.map(x => x.e.id));
+  pl.itens = pl.itens.filter(it => ids.has(it.e));
+  pl.unioes = pl.unioes.filter(u => ids.has(u.pai.e) && ids.has(u.filho.e) && u.pai.w < esbGeo(acharEsboco(p, u.pai.e).e).n && u.filho.w < esbGeo(acharEsboco(p, u.filho.e).e).n);
+  // cômodo novo entra à direita do que já existe
+  let xr = 0; for (const it of pl.itens) { const b = esbBounds(acharEsboco(p, it.e).e, false); if (b) xr = Math.max(xr, it.x + Math.hypot(b.x + b.w, b.y + b.h)); }
+  for (const { e } of lista) if (!pl.itens.some(it => it.e === e.id)) { const b = esbBounds(e, false) || { x: 0, y: 0, w: 1000, h: 1000 }; pl.itens.push({ e: e.id, x: xr + 600 - b.x, y: -b.y, rot: 0 }); xr += b.w + 600; }
+  return pl;
+}
+// Posição de cada cômodo (mundo = giro + deslocamento). Filhos de união seguem a parede do pai.
+function layoutPlanta(p) {
+  const pl = p.planta, L = new Map(), filhoDe = new Map(pl.unioes.map(u => [u.filho.e, u]));
+  const tfDe = it => ({ rot: it.rot, x: it.x, y: it.y, f: q => { const r = rotV(it.rot, q); return [r[0] + it.x, r[1] + it.y]; } });
+  for (const it of pl.itens) if (!filhoDe.has(it.e)) L.set(it.e, tfDe(it));
+  for (let volta = 0, mudou = true; mudou && volta < 50; volta++) {
+    mudou = false;
+    for (const u of pl.unioes) {
+      if (L.has(u.filho.e) || !L.has(u.pai.e)) continue;
+      const it = pl.itens.find(x => x.e === u.filho.e); Object.assign(it, posicaoFilho(p, u, L.get(u.pai.e))); L.set(u.filho.e, tfDe(it)); mudou = true;
+    }
+  }
+  for (const it of pl.itens) if (!L.has(it.e)) L.set(it.e, tfDe(it)); // ciclo: fica onde estava
+  return L;
+}
+function paredeMundo(e, tf, i) {
+  const g = esbGeo(e), a0 = tf.f(g.P[i]), a1 = tf.f(g.P[i + 1]), Lw = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1;
+  return { a0, a1, u: [(a1[0] - a0[0]) / Lw, (a1[1] - a0[1]) / Lw], n: rotV(tf.rot, normalFora(g, i)), L: Lw };
+}
+// Filho encostado na parede do pai: normais opostas, separados pela espessura da parede, a "desl" mm do início da parede do pai
+function posicaoFilho(p, u, tfPai) {
+  const A = paredeMundo(acharEsboco(p, u.pai.e).e, tfPai, u.pai.w), eF = acharEsboco(p, u.filho.e).e, gF = esbGeo(eF), nB = normalFora(gF, u.filho.w);
+  const rot = (Math.atan2(-A.n[1], -A.n[0]) - Math.atan2(nB[1], nB[0])) * 180 / Math.PI;
+  const b0 = rotV(rot, gF.P[u.filho.w]), b1 = rotV(rot, gF.P[u.filho.w + 1]);
+  const bm = b0[0] * A.u[0] + b0[1] * A.u[1] <= b1[0] * A.u[0] + b1[1] * A.u[1] ? b0 : b1, esp = p.planta.esp;
+  const alvo = [A.a0[0] + A.u[0] * u.desl + A.n[0] * esp, A.a0[1] + A.u[1] * u.desl + A.n[1] * esp];
+  return { rot, x: alvo[0] - bm[0], y: alvo[1] - bm[1] };
+}
+const descendentes = (p, id) => { const s = new Set([id]); let m = true; while (m) { m = false; for (const u of p.planta.unioes) if (s.has(u.pai.e) && !s.has(u.filho.e)) { s.add(u.filho.e); m = true; } } return s; };
+// Ímã: parede do cômodo arrastado de frente para a parede de outro cômodo, perto e sobrepostas
+function procurarIma(p, L, idMov, tolMM) {
+  const fora = descendentes(p, idMov), eM = acharEsboco(p, idMov).e, gM = esbGeo(eM), tfM = L.get(idMov); let melhor = null;
+  for (let j = 0; j < gM.n; j++) {
+    const M = paredeMundo(eM, tfM, j);
+    for (const [id, tf] of L) {
+      if (fora.has(id)) continue; const eO = acharEsboco(p, id).e, gO = esbGeo(eO);
+      for (let i = 0; i < gO.n; i++) {
+        const O = paredeMundo(eO, tf, i), frente = M.n[0] * O.n[0] + M.n[1] * O.n[1]; if (frente > -0.93) continue;
+        const mid = [(M.a0[0] + M.a1[0]) / 2, (M.a0[1] + M.a1[1]) / 2], d = (mid[0] - O.a0[0]) * O.n[0] + (mid[1] - O.a0[1]) * O.n[1];
+        if (Math.abs(d - p.planta.esp) > tolMM) continue;
+        const s0 = (M.a0[0] - O.a0[0]) * O.u[0] + (M.a0[1] - O.a0[1]) * O.u[1], s1 = (M.a1[0] - O.a0[0]) * O.u[0] + (M.a1[1] - O.a0[1]) * O.u[1];
+        const lo = Math.min(s0, s1), hi = Math.max(s0, s1); if (hi < 0 || lo > O.L) continue;
+        const nota = Math.abs(d - p.planta.esp) + (1 + frente) * 4000;
+        if (!melhor || nota < melhor.nota) melhor = { nota, pai: { e: id, w: i }, filho: { e: idMov, w: j }, desl: Math.round(lo / 10) * 10 };
+      }
+    }
+  }
+  return melhor;
+}
+// Paredes unidas com "mesma medida": mudou uma, a outra acompanha
+function sincronizarUnioes(p) {
+  for (const u of p?.planta?.unioes || []) {
+    if (!u.igual) continue; const P1 = acharEsboco(p, u.pai.e), F1 = acharEsboco(p, u.filho.e); if (!P1 || !F1) continue;
+    const wp = P1.e.walls[u.pai.w], wf = F1.e.walls[u.filho.w]; if (!wp || !wf) continue;
+    if (wp.mm != null && wp.mm !== u.mm0) { wf.mm = wp.mm; wf.o = wp.o; } else if (wf.mm != null && wf.mm !== u.mm0) { wp.mm = wf.mm; wp.o = wf.o; }
+    u.mm0 = wp.mm ?? wf.mm ?? null;
+  }
+}
+function svgPlanta(p, L, k, op = {}) {
+  const pl = p.planta, out = [];
+  // faixa da parede entre cômodos unidos (espessura)
+  for (const u of pl.unioes) {
+    const tP = L.get(u.pai.e), tF = L.get(u.filho.e); if (!tP || !tF) continue;
+    const A = paredeMundo(acharEsboco(p, u.pai.e).e, tP, u.pai.w), B = paredeMundo(acharEsboco(p, u.filho.e).e, tF, u.filho.w);
+    const pr = q => (q[0] - A.a0[0]) * A.u[0] + (q[1] - A.a0[1]) * A.u[1], lo = Math.max(0, Math.min(pr(B.a0), pr(B.a1))), hi = Math.min(A.L, Math.max(pr(B.a0), pr(B.a1)));
+    if (hi <= lo) continue;
+    const q = (s, e2) => [A.a0[0] + A.u[0] * s + A.n[0] * e2, A.a0[1] + A.u[1] * s + A.n[1] * e2], sel = op.selU === u.id;
+    out.push(`<polygon data-un="${u.id}" points="${[q(lo, 0), q(hi, 0), q(hi, pl.esp), q(lo, pl.esp)].map(x => x.join(',')).join(' ')}" fill="${sel ? '#f3b9a5' : '#d8cfbf'}" stroke="${sel ? '#e4572e' : 'none'}" stroke-width="${2 * k}"/>`);
+  }
+  for (const it of pl.itens) {
+    const r = acharEsboco(p, it.e), tf = L.get(it.e); if (!r || !tf) continue;
+    const g = esbGeo(r.e), sel = op.sel === it.e;
+    out.push(`<g data-it="${it.e}" transform="translate(${tf.x} ${tf.y}) rotate(${tf.rot})">
+      <polygon points="${g.P.slice(0, Math.max(g.n, 2)).map(q => q.join(',')).join(' ')}" fill="${sel ? 'rgba(228,87,46,.10)' : 'rgba(255,253,249,.85)'}" stroke="${sel ? '#e4572e' : 'none'}" stroke-width="${3 * k}"/>
+      ${svgEsboco(r.e, k, { rot: tf.rot, fotos: [], fundo: false })}</g>`);
+  }
+  if (op.ima) for (const [id, w] of [[op.ima.pai.e, op.ima.pai.w], [op.ima.filho.e, op.ima.filho.w]]) {
+    const W = paredeMundo(acharEsboco(p, id).e, L.get(id), w);
+    out.push(`<line x1="${W.a0[0]}" y1="${W.a0[1]}" x2="${W.a1[0]}" y2="${W.a1[1]}" stroke="#0f5e59" stroke-width="${7 * k}" stroke-linecap="round" opacity=".75"/>`);
+  }
+  return out.join('');
+}
+function limitesPlanta(p, L) {
+  const xs = [], ys = [];
+  for (const it of p.planta.itens) { const r = acharEsboco(p, it.e), tf = L.get(it.e); if (!r || !tf) continue; esbGeo(r.e).P.forEach(q => { const w = tf.f(q); xs.push(w[0]); ys.push(w[1]); }); }
+  if (!xs.length) return { x: -3000, y: -3000, w: 6000, h: 6000 };
+  const x = Math.min(...xs), y = Math.min(...ys); return { x, y, w: Math.max(...xs) - x || 1, h: Math.max(...ys) - y || 1 };
+}
+function vPlanta() {
+  const p = proj(), pl = normalizarPlanta(p);
+  app.innerHTML = `
+  <div class="ftool"><span class="muted" style="flex:1">${pl.itens.length} ambiente(s) · ${pl.unioes.length} união(ões)</span>${KIT_ZOOM}<button class="small btn2" id="plMais" aria-label="Mais">${ic('mais')}</button></div>
+  <div class="board"><svg id="plsvg" class="vsvg esb"><g class="cam"></g></svg><div class="fdica" id="pldica">${pl.itens.length < 2 ? 'Desenhe a planta de pelo menos 2 ambientes' : 'Arraste um ambiente até a parede do outro: o ímã une'}</div></div>
+  <div id="plbar" class="fbar" hidden></div>`;
+  const svg = document.getElementById('plsvg'), cam = svg.querySelector('g.cam');
+  let L = layoutPlanta(p), sel = null, selU = null, ima = null;
+  const desenha = () => { cam.innerHTML = svgPlanta(p, L, v.k, { sel, selU, ima }); };
+  const refaz = () => { L = layoutPlanta(p); desenha(); };
+  const v = new Vista(svg, {
+    mudou: desenha,
+    onDown: (w, tgt) => {
+      const un = tgt.closest?.('[data-un]'); if (un) return { up: (_, m) => { if (!m) selecionarU(un.dataset.un); } };
+      const el = tgt.closest?.('[data-it]'); if (!el) return null;
+      const id = el.dataset.it, it = pl.itens.find(x => x.e === id), x0 = it.x, y0 = it.y; let solto = false;
+      return {
+        move: (w2, m) => {
+          if (!m) return;
+          if (!solto) { solto = true; const n0 = pl.unioes.length; pl.unioes = pl.unioes.filter(u => u.filho.e !== id); if (pl.unioes.length < n0) toast('União desfeita — solte encostado em outra parede para unir de novo.'); }
+          it.x = x0 + w2[0] - w[0]; it.y = y0 + w2[1] - w[1]; L = layoutPlanta(p); ima = procurarIma(p, L, id, Math.max(350, 40 * v.k)); sel = id; desenha();
+        },
+        up: (_, m) => {
+          if (!m) return selecionar(id);
+          if (ima) {
+            const r1 = acharEsboco(p, ima.pai.e), r2 = acharEsboco(p, ima.filho.e), a1 = r1.e.walls[ima.pai.w]?.mm, a2 = r2.e.walls[ima.filho.w]?.mm;
+            const igual = a1 != null && a2 != null && Math.abs(a1 - a2) <= 50;
+            pl.unioes.push({ id: uid(), pai: ima.pai, filho: ima.filho, desl: ima.desl, igual, mm0: igual ? a1 : null });
+            toast(`Unido: ${r2.e.nome} P${ima.filho.w + 1} ↔ ${r1.e.nome} P${ima.pai.w + 1}`);
+          }
+          ima = null; tocar(); refaz(); selecionar(id);
+        }
+      };
+    },
+    onTap: () => { if (sel || selU) { selecionar(null); } }
+  });
+  const nomeU = u => `${acharEsboco(p, u.filho.e).e.nome} P${u.filho.w + 1} ↔ ${acharEsboco(p, u.pai.e).e.nome} P${u.pai.w + 1}`;
+  // girar em volta do centro do cômodo; quem é filho de união se solta antes
+  const girar = (id, g) => {
+    const it = pl.itens.find(x => x.e === id), n0 = pl.unioes.length; pl.unioes = pl.unioes.filter(u => u.filho.e !== id);
+    if (pl.unioes.length < n0) toast('União desfeita para girar.');
+    L = layoutPlanta(p); const b = esbBounds(acharEsboco(p, id).e, false), c = [b.x + b.w / 2, b.y + b.h / 2], W = L.get(id).f(c);
+    it.rot = ((it.rot + g) % 360 + 360) % 360; const r = rotV(it.rot, c); it.x = W[0] - r[0]; it.y = W[1] - r[1]; tocar(); refaz();
+  };
+  const selecionar = id => {
+    sel = id; selU = null; desenha(); const bar = document.getElementById('plbar');
+    if (!id) { bar.hidden = true; return; }
+    const r = acharEsboco(p, id), u = pl.unioes.find(x => x.filho.e === id); bar.hidden = false;
+    bar.innerHTML = `<b>${esc(r.e.nome)}</b><button class="small btn2" id="gE" aria-label="Girar 15° à esquerda">↺ 15°</button><button class="small btn2" id="g90">↻ 90°</button><button class="small btn2" id="gD" aria-label="Girar 15° à direita">↻ 15°</button>
+      <button class="small btn2" id="plAbrir" aria-label="Abrir planta">${ic('lapis')}</button><button class="small btn2" id="plOk" aria-label="Fechar">${ic('ok')}</button>
+      ${u ? `<div class="linha2"><span class="muted">Unido: ${esc(nomeU(u))}</span><button class="small btn2" id="plU">Ajustar união</button></div>` : ''}`;
+    document.getElementById('gE').onclick = () => girar(id, -15); document.getElementById('gD').onclick = () => girar(id, 15); document.getElementById('g90').onclick = () => girar(id, 90);
+    document.getElementById('plAbrir').onclick = () => ir({ v: 'esb', p: p.id, a: r.a.id, e: id, de: 'planta' });
+    document.getElementById('plOk').onclick = () => selecionar(null);
+    document.getElementById('plU')?.addEventListener('click', () => selecionarU(u.id));
+  };
+  const selecionarU = uidSel => {
+    selU = uidSel; sel = null; desenha(); const bar = document.getElementById('plbar'), u = pl.unioes.find(x => x.id === uidSel);
+    if (!u) { bar.hidden = true; return; }
+    bar.hidden = false;
+    bar.innerHTML = `<b>União</b><label class="mini">Deslocamento<input id="uDes" inputmode="decimal" value="${Math.round(u.desl)}"></label><label class="mini">Parede entre<input id="uEsp" inputmode="decimal" value="${Math.round(pl.esp)}"></label>
+      <button class="small btnbad" id="uX" aria-label="Soltar">${ic('lixo')}</button><button class="small btn2" id="uOk" aria-label="Fechar">${ic('ok')}</button>
+      <div class="linha2"><span class="muted">${esc(nomeU(u))}</span><label class="sw" style="margin:0"><input type="checkbox" id="uIg" ${u.igual ? 'checked' : ''}><span>Mesma medida nas duas paredes</span></label></div>`;
+    const num = el => { const val = parseFloat(el.value.replace(',', '.')); return isNaN(val) ? null : val; };
+    const iD = document.getElementById('uDes'), iE = document.getElementById('uEsp');
+    iD.onchange = () => { const val = num(iD); if (val != null) { u.desl = val; tocar(); refaz(); } };
+    iE.onchange = () => { const val = num(iE); if (val != null && val >= 0) { pl.esp = val; tocar(); refaz(); } };
+    alvo = { inp: iD, aplicar: val => { iD.value = Math.round(val); u.desl = val; tocar(); refaz(); } }; iD.classList.add('alvo');
+    document.getElementById('uIg').onchange = ev => {
+      u.igual = ev.target.checked;
+      if (u.igual) { const wp = acharEsboco(p, u.pai.e).e.walls[u.pai.w], wf = acharEsboco(p, u.filho.e).e.walls[u.filho.w]; const src = wp.mm != null ? wp : wf; if (src.mm != null) { wp.mm = wf.mm = src.mm; wp.o = wf.o = src.o; } u.mm0 = src.mm ?? null; }
+      tocar(); refaz();
+    };
+    document.getElementById('uX').onclick = () => { pl.unioes = pl.unioes.filter(x => x !== u); tocar(); refaz(); selecionarU(null); toast('União desfeita.'); };
+    document.getElementById('uOk').onclick = () => selecionarU(null);
+  };
+  const ajustar = () => { const b = limitesPlanta(p, L), m = Math.max(b.w, b.h) * 0.1 + 400; v.enquadrar({ x: b.x - m, y: b.y - m, w: b.w + 2 * m, h: b.h + 2 * m }, 0.02); };
+  ligarZoom(app, v, ajustar); ajustar();
+  document.getElementById('plMais').onclick = () => {
+    const d = document.getElementById('dlg');
+    d.innerHTML = `<b>Planta completa</b><div style="display:grid;gap:8px;margin-top:10px">
+      <button id="plDxf">${ic('baixar')} DXF da planta completa</button><button class="btn2" id="plPng">${ic('baixar')} Imagem (PNG)</button>
+      <button class="btn2" id="plEsp">Espessura da parede entre ambientes: ${fL(pl.esp)}</button>
+      <button class="btn2" id="plOrg">Separar todos os ambientes</button><button id="plF">Fechar</button></div>`;
+    d.showModal(); const q = x => d.querySelector(x);
+    q('#plF').onclick = () => d.close();
+    q('#plDxf').onclick = () => { d.close(); baixar(`${p.nome}_planta_completa.dxf`, dxfPlanta(p), 'application/dxf'); };
+    q('#plPng').onclick = async () => { d.close(); const im = await plantaPNG(p); baixar(`${p.nome}_planta_completa.png`, await (await fetch(im.url)).blob(), 'image/png'); };
+    q('#plEsp').onclick = async () => { d.close(); const r = await pedir('Espessura da parede', 'Parede entre ambientes unidos, em mm (0 = encostado)', String(pl.esp)); const val = parseFloat(String(r || '').replace(',', '.')); if (val >= 0) { pl.esp = val; tocar(); refaz(); } };
+    q('#plOrg').onclick = async () => { d.close(); if (!await confirmar('Desfazer todas as uniões e separar os ambientes?')) return; pl.unioes = []; pl.itens = []; normalizarPlanta(p); tocar(); refaz(); ajustar(); };
+  };
+  desenha();
+}
+function dxfPlanta(p) {
+  normalizarPlanta(p); const L = layoutPlanta(p), segs = [];
+  for (const it of p.planta.itens) { const r = acharEsboco(p, it.e); if (r) segs.push(...dxf(r.e, false, L.get(it.e).f, true)); }
+  return dxfArquivo(segs);
+}
+async function plantaPNG(p, W = 2000) {
+  normalizarPlanta(p); const L = layoutPlanta(p), b = limitesPlanta(p, L), m = Math.max(b.w, b.h) * 0.08 + 300;
+  const X = b.x - m, Y = b.y - m, Wd = b.w + 2 * m, Hd = b.h + 2 * m, k = Math.max(Wd, Hd * 1.1) / 900;
+  let H = Math.round(W * Hd / Wd); if (H > 2600) { W = Math.round(W * 2600 / H); H = 2600; }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${X} ${Y} ${Wd} ${Hd}" font-family="Helvetica, Arial, sans-serif"><rect x="${X}" y="${Y}" width="${Wd}" height="${Hd}" fill="#ffffff"/>${svgPlanta(p, L, k)}</svg>`;
+  const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode();
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H);
+  return { url: c.toDataURL('image/png'), w: W, h: H };
+}
+
 /* ===================== Checklist da medição (por ambiente) ===================== */
 // Itens automáticos saem dos dados; os outros o medidor marca como feito ou "não se aplica".
 const CHECK_AUTO = [
@@ -2870,6 +3142,10 @@ async function gerarPDF(p, soArea) {
   if (c.pdf.cliente) { const cl = CAMPOS.filter(([k]) => p.cliente?.[k]); if (cl.length) { titulo('Cliente', 12); cl.forEach(([k, l]) => kv(l, p.cliente[k])); y += 4; } }
   titulo('Ambientes', 12);
   areas.forEach(a => { const ar = a.esbocos.reduce((s, e) => s + (esbGeo(e).area || 0), 0); kv(a.nome, `${a.esbocos.length} planta(s) · ${a.fotos.length} foto(s)${ar ? ' · ' + m2(ar) : ''}`); });
+  if (!soArea && c.pdf.plantaCompleta && esbocosDoProjeto(p).length > 1) {
+    const im = await plantaPNG(p).catch(() => null);
+    if (im) { cab(); titulo('Planta completa', 16); let w = CW, h = CW * im.h / im.w; if (h > 230) { h = 230; w = h * im.w / im.h; } doc.addImage(im.url, 'PNG', M + (CW - w) / 2, y, w, h); y += h + 5; }
+  }
   for (const a of areas) {
     cab(); titulo(a.nome, 16);
     for (const e of a.esbocos) {
