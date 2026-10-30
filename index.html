@@ -1291,7 +1291,8 @@ function remapear(a, e, fn) {
   e.aberturas = e.aberturas.filter(o => !o._x);
   for (const f of a.fotos) if (f.liga?.e === e.id) { const r = fn(f.liga.w, f.liga.t); if (r == null) delete f.liga; else { f.liga.w = r.w; if (r.t != null) f.liga.t = r.t; } }
   // pontos da vista da parede (tomadas, água…) acompanham a parede; a distância continua contada da esquerda
-  for (const pt of e.pontos || []) { const r = fn(+pt.parede, 0.5); if (r == null) pt._x = true; else pt.parede = r.w; }
+  for (const pt of [...(e.pontos || []), ...(e.fundosP || [])]) { const r = fn(+pt.parede, 0.5); if (r == null) pt._x = true; else pt.parede = r.w; }
+  if (e.fundosP) e.fundosP = e.fundosP.filter(f => !f._x);
   if (e.pontos) e.pontos = e.pontos.filter(pt => !pt._x);
   // a planta mudou de forma: medidas em 3 pontos e diagonais deixam de valer só se a parede sumir
   if (e.diag && !(e.fechado && nParedes(e) === 4)) delete e.diag;
@@ -2500,7 +2501,7 @@ function moverFundo(e, orig, dx, dy) {
   if (fd.img) { fd.x = orig.x + dx; fd.y = orig.y + dy; }
   if (orig.segs) fd.segs = orig.segs.map(s => [s[0] + dx, s[1] + dy, s[2] + dx, s[3] + dy]);
 }
-const blobsDaArea = a => [...a.fotos, ...(a.scans || []), ...a.esbocos.filter(e => e.fundo?.img).map(e => ({ id: e.fundo.img }))];
+const blobsDaArea = a => [...a.fotos, ...(a.scans || []), ...a.esbocos.filter(e => e.fundo?.img).map(e => ({ id: e.fundo.img })), ...a.esbocos.flatMap(e => (e.fundosP || []).map(f => ({ id: f.img })))];
 
 /* ===================== Medidas de conferência: 3 pontos e esquadro ===================== */
 function tresInfo(w) {
@@ -2524,9 +2525,16 @@ function esquadroTxt(e, html) {
 
 /* ===================== Vista da parede (elevação) com pontos elétricos e hidráulicos ===================== */
 // Cada ponto: { id, tipo, parede, x (mm da ESQUERDA, olhando a parede de dentro do cômodo), h (mm do piso), obs, o }
+// [nome, cor, ícone (traço branco 24×24), altura padrão em mm]
 const TIPOS_PONTO = {
-  tomada: ['Tomada', '#e4572e', 'T', 300], interruptor: ['Interruptor', '#7b4fd6', 'I', 1100], agua: ['Água', '#2f6fd6', 'A', 600],
-  esgoto: ['Esgoto', '#6f675b', 'E', 500], gas: ['Gás', '#e0a100', 'G', 600], ar: ['Ar-cond.', '#1f9d6b', 'AC', 2200], outro: ['Outro', '#1d1b18', '•', 1000]
+  tomada: ['Tomada', '#e4572e', '<circle cx="12" cy="12" r="7.5"/><circle cx="9.3" cy="10.6" r="1.3" fill="#fff" stroke="none"/><circle cx="14.7" cy="10.6" r="1.3" fill="#fff" stroke="none"/><circle cx="12" cy="15.2" r="1.3" fill="#fff" stroke="none"/>', 300],
+  interruptor: ['Interruptor', '#7b4fd6', '<rect x="6.5" y="4" width="11" height="16" rx="2.2"/><rect x="10" y="7.5" width="4" height="9" rx="1" fill="#fff" stroke="none"/>', 1100],
+  agua: ['Ponto de água', '#2f6fd6', '<path d="M12 3.5c3.2 4.6 5.4 7.4 5.4 10.1a5.4 5.4 0 01-10.8 0c0-2.7 2.2-5.5 5.4-10.1z"/>', 600],
+  registro: ['Registro', '#0f5e59', '<path d="M7.5 5.5h9M12 5.5v4.5"/><rect x="8.5" y="10" width="7" height="7" rx="1.5"/><path d="M3.5 13.5h5M15.5 13.5h5"/>', 1000],
+  esgoto: ['Esgoto', '#6f675b', '<circle cx="12" cy="12" r="7.5"/><path d="M8 9.5h8M7 12h10M8 14.5h8"/>', 500],
+  gas: ['Gás', '#e0a100', '<path d="M12 3.5c1 3.2 5 5 5 9.8a5 5 0 01-10 0c0-2.4 1.2-3.8 2.3-4.8.1 1.8 1 2.9 2.2 3.1-.6-2.8-.4-5.1.5-8.1z"/>', 600],
+  ar: ['Ar-cond.', '#1f9d6b', '<path d="M12 3.5v17M4.6 7.75l14.8 8.5M19.4 7.75L4.6 16.25M9.5 4.5L12 6.5l2.5-2M9.5 19.5L12 17.5l2.5 2"/>', 2200],
+  outro: ['Outro', '#1d1b18', '<circle cx="12" cy="12" r="2.6" fill="#fff" stroke="none"/>', 1000]
 };
 const PE_DIREITO_PADRAO = 2600;
 function elevGeo(e, i) {
@@ -2536,32 +2544,59 @@ function elevGeo(e, i) {
   const H = e.altura != null ? +e.altura : PE_DIREITO_PADRAO;
   return { g, L, H, conhecido: e.altura != null, esq, X: dist => esq ? dist : L - dist, cantoE: esq ? i + 1 : (i + 1) % g.n + 1 };
 }
+// ícone do tipo de ponto numa bolinha da cor do tipo (botões)
+const icPonto = (T, px) => `<span style="display:inline-grid;place-items:center;width:${px}px;height:${px}px;border-radius:50%;background:${T[1]};flex:0 0 auto"><svg viewBox="0 0 24 24" width="${px * 0.82}" height="${px * 0.82}" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${T[2]}</svg></span>`;
+// Abertura na vista: x da esquerda (a planta guarda dist a partir do canto i)
+const abEsq = (G, o) => G.esq ? +o.dist || 0 : G.L - (+o.dist || 0) - (+o.larg || 0);
+const abDeEsq = (G, o, xe) => { o.dist = Math.round(G.esq ? xe : G.L - xe - (+o.larg || 0)); };
+// Fundo da parede (foto de frente ou corte do projeto em PDF/imagem): { parede, img, x, y, w, h, op } em mm da vista
+const fundoParede = (e, i) => (e.fundosP || []).find(f => +f.parede === i);
+async function importarFundoParede(a, e, i, file) {
+  const G = elevGeo(e, i); let blob, ar;
+  if (/pdf/i.test(file.type) || /\.pdf$/i.test(file.name)) {
+    const r = await pdfParaCanvas(file); blob = await new Promise(ok => r.canvas.toBlob(ok, 'image/jpeg', 0.85)); ar = r.canvas.height / r.canvas.width;
+  } else { blob = await reduzir(file, 2400); const bmp = await createImageBitmap(blob); ar = bmp.height / bmp.width; }
+  const id = uid(); await DB.put('fotos', id, blob); URLS[id] = URL.createObjectURL(blob);
+  const velho = fundoParede(e, i); if (velho) { await DB.del('fotos', velho.img); delete URLS[velho.img]; }
+  const w = G.L, h = w * ar;
+  e.fundosP = [...(e.fundosP || []).filter(f => f !== velho), { parede: i, img: id, x: 0, y: -h, w, h, op: 0.6 }];
+  tocar();
+}
 function svgParede(e, i, k, op = {}) {
-  const G = elevGeo(e, i), { L, H } = G, out = [], fs = 11 * k, sw = 2.4 * k;
-  out.push(`<rect x="0" y="${-H}" width="${L}" height="${H}" fill="#fbf8f2" stroke="#1d1b18" stroke-width="${sw}" ${G.conhecido ? '' : `stroke-dasharray="${8 * k} ${5 * k}"`}/>`);
+  const G = elevGeo(e, i), { L, H } = G, out = [], fs = 11 * k, sw = 2.4 * k, fd = fundoParede(e, i);
+  if (fd && op.urls !== false && URLS[fd.img]) out.push(`<image href="${URLS[fd.img]}" x="${fd.x}" y="${fd.y}" width="${fd.w}" height="${fd.h}" opacity="${fd.op ?? 0.6}" preserveAspectRatio="none"/>`);
+  out.push(`<rect x="0" y="${-H}" width="${L}" height="${H}" fill="${fd ? 'none' : '#fbf8f2'}" stroke="#1d1b18" stroke-width="${sw}" ${G.conhecido ? '' : `stroke-dasharray="${8 * k} ${5 * k}"`}/>`);
   out.push(`<line x1="${-L * 0.06 - 200}" y1="0" x2="${L * 1.06 + 200}" y2="0" stroke="#1d1b18" stroke-width="${sw * 1.4}"/>`);
-  // portas e janelas desta parede (dist é contada do canto i; na vista, da esquerda)
-  e.aberturas.forEach(o => {
+  // portas e janelas desta parede
+  e.aberturas.forEach((o, j) => {
     if (+o.parede !== i) return;
-    const xa = G.X(+o.dist || 0), xb = G.X((+o.dist || 0) + (+o.larg || 0)), x = Math.min(xa, xb), w = Math.abs(xb - xa), p = o.tipo === 'porta' ? 0 : +o.peit || 0, h = +o.alt || 0;
-    out.push(`<rect x="${x}" y="${-(p + h)}" width="${w}" height="${h}" fill="${o.tipo === 'porta' ? '#fff' : '#e3efed'}" stroke="${o.tipo === 'porta' ? '#857c6f' : '#0f5e59'}" stroke-width="${1.4 * k}"/>`);
-    out.push(textoSvg(x + w / 2, -(p + h / 2), `${o.tipo === 'porta' ? 'Porta' : 'Janela'}\n${fN(w)} × ${fN(h)}`, fs * 0.9, '', '#5f584e'));
+    const x = abEsq(G, o), w = +o.larg || 0, p = o.tipo === 'porta' ? 0 : +o.peit || 0, h = +o.alt || 0, sel = op.selAb === j, porta = o.tipo === 'porta';
+    out.push(`<g data-ab2="${j}"><rect x="${x}" y="${-(p + h)}" width="${w}" height="${h}" fill="${porta ? '#fff' : '#e3efed'}" stroke="${sel ? '#e4572e' : porta ? '#857c6f' : '#0f5e59'}" stroke-width="${(sel ? 3 : 1.4) * k}"/>
+      ${porta ? `<circle cx="${x + w * 0.85}" cy="${-h * 0.48}" r="${3 * k}" fill="#857c6f"/>` : `<line x1="${x + w / 2}" y1="${-(p + h)}" x2="${x + w / 2}" y2="${-p}" stroke="#0f5e59" stroke-width="${k}"/>`}</g>`);
+    out.push(textoSvg(x + w / 2, -(p + h / 2), `${porta ? 'Porta' : 'Janela'}\n${fN(w)} × ${fN(h)}`, fs * 0.9, '', '#5f584e'));
+    if (sel || op.cotasAb) {
+      // distância da esquerda e peitoril
+      const yc = -(p + h) - 14 * k;
+      out.push(`<line x1="0" y1="${yc}" x2="${x}" y2="${yc}" stroke="#e4572e" stroke-width="${0.9 * k}" stroke-dasharray="${3 * k} ${3 * k}"/>`);
+      out.push(textoSvg(x / 2, yc - 5 * k, fN(x), fs * 0.85, '', '#e4572e'));
+      if (!porta && p) out.push(`<g transform="translate(${x + w + 6 * k} ${-p / 2}) rotate(-90)">${textoSvg(0, 0, 'peit. ' + fN(p), fs * 0.85, '', '#0f5e59')}</g>`);
+    }
   });
   // cotas gerais: comprimento embaixo e pé-direito à esquerda
   out.push(`<line x1="0" y1="${40 * k}" x2="${L}" y2="${40 * k}" stroke="#1d1b18" stroke-width="${k}"/><line x1="0" y1="${30 * k}" x2="0" y2="${50 * k}" stroke="#1d1b18" stroke-width="${k}"/><line x1="${L}" y1="${30 * k}" x2="${L}" y2="${50 * k}" stroke="#1d1b18" stroke-width="${k}"/>`);
-  out.push(textoSvg(L / 2, 40 * k + fs * 1.6, `P${i + 1} · ${fN(L)}`, fs, ""));
+  out.push(textoSvg(L / 2, 40 * k + fs * 1.6, `P${i + 1} · ${fN(L)}`, fs, ''));
   out.push(`<g transform="translate(${-40 * k} ${-H / 2}) rotate(-90)">${textoSvg(0, fs * 0.4, `${G.conhecido ? '' : '≈ '}pé-direito ${fN(H)}`, fs, '', G.conhecido ? '#1d1b18' : '#a39a8c')}</g>`);
   out.push(textoSvg(0, -H - 16 * k, `canto ${G.cantoE}`, fs * 0.85, '', '#857c6f'));
   // pontos
   (e.pontos || []).forEach(pt => {
     if (+pt.parede !== i) return;
-    const T = TIPOS_PONTO[pt.tipo] || TIPOS_PONTO.outro, x = +pt.x || 0, y = -(+pt.h || 0), r = 10 * k, sel = op.sel === pt.id;
+    const T = TIPOS_PONTO[pt.tipo] || TIPOS_PONTO.outro, x = +pt.x || 0, y = -(+pt.h || 0), r = 12 * k, sel = op.sel === pt.id;
     out.push(`<line x1="${x}" y1="0" x2="${x}" y2="${y}" stroke="${T[1]}" stroke-width="${0.9 * k}" stroke-dasharray="${3 * k} ${3 * k}" opacity=".7"/>`);
     out.push(`<line x1="0" y1="${y}" x2="${x}" y2="${y}" stroke="${T[1]}" stroke-width="${0.9 * k}" stroke-dasharray="${3 * k} ${3 * k}" opacity=".7"/>`);
     out.push(textoSvg(x / 2, y - 5 * k, fN(x), fs * 0.85, '', T[1]));
-    out.push(`<g transform="translate(${x + 5 * k} ${y / 2}) rotate(-90)">${textoSvg(0, 0, fN(-y), fs * 0.85, '', T[1])}</g>`);
-    out.push(`<g data-pt="${pt.id}"><circle cx="${x}" cy="${y}" r="${r * 2.2}" fill="transparent"/><circle cx="${x}" cy="${y}" r="${r}" fill="${T[1]}" stroke="${sel ? '#1d1b18' : '#fff'}" stroke-width="${(sel ? 3 : 1.5) * k}"/>
-      <text x="${x}" y="${y + r * 0.38}" font-size="${r * (T[2].length > 1 ? 0.85 : 1.1)}" text-anchor="middle" font-weight="700" fill="${pt.tipo === 'gas' ? '#1d1b18' : '#fff'}">${T[2]}</text></g>`);
+    out.push(`<g transform="translate(${x + r + 5 * k} ${y / 2}) rotate(-90)">${textoSvg(0, 0, fN(-y), fs * 0.85, '', T[1])}</g>`);
+    out.push(`<g data-pt="${pt.id}"><circle cx="${x}" cy="${y}" r="${r * 2}" fill="transparent"/><circle cx="${x}" cy="${y}" r="${r}" fill="${T[1]}" stroke="${sel ? '#1d1b18' : '#fff'}" stroke-width="${(sel ? 3 : 1.5) * k}"/>
+      <g transform="translate(${x - r * 0.8} ${y - r * 0.8}) scale(${r * 1.6 / 24})" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${T[2]}</g></g>`);
     if (pt.obs) out.push(textoSvg(x, y + r + fs * 1.2, pt.obs.slice(0, 30), fs * 0.8, '', '#3a3631'));
   });
   return out.join('');
@@ -2573,57 +2608,150 @@ function vParede() {
   const G = elevGeo(e, i);
   app.innerHTML = `
   <div class="ftool"><span class="muted" style="flex:1">Vista de dentro do cômodo · distâncias da esquerda</span>${KIT_ZOOM}</div>
-  <div class="ftool" style="overflow-x:auto;flex-wrap:nowrap">${Object.entries(TIPOS_PONTO).map(([k, T]) => `<button class="small btn2" data-novo="${k}" style="flex:0 0 auto"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${T[1]}"></span>${T[0]}</button>`).join('')}</div>
+  <div class="ftool" style="overflow-x:auto;flex-wrap:nowrap">
+   <button class="small btn2" id="pFundo" style="flex:0 0 auto">${ic('galeria')}Fundo</button>
+   <button class="small btn2" data-abnova="porta" style="flex:0 0 auto">${ic('porta')}Porta</button><button class="small btn2" data-abnova="janela" style="flex:0 0 auto">${ic('janela')}Janela</button>
+   ${Object.entries(TIPOS_PONTO).map(([k, T]) => `<button class="small btn2" data-novo="${k}" style="flex:0 0 auto">${icPonto(T, 22)}${T[0]}</button>`).join('')}</div>
   <div class="board" style="height:calc(100dvh - 330px - env(safe-area-inset-top) - env(safe-area-inset-bottom))"><svg id="psvg" class="vsvg esb"><g class="cam"></g></svg><div class="fdica" id="pdica" ${G.conhecido ? 'hidden' : ''}>Pé-direito não medido: usando ${fL(PE_DIREITO_PADRAO)}</div></div>
   <div id="pbar" class="fbar" hidden></div>`;
   const svg = document.getElementById('psvg'), cam = svg.querySelector('g.cam');
-  let sel = null;
-  const desenha = () => { cam.innerHTML = svgParede(e, i, v.k, { sel: sel?.id }); };
+  let sel = null, selAb = null, modo = null; const marcas = [];
+  const desenha = () => {
+    const k = v.k;
+    cam.innerHTML = svgParede(e, i, k, { sel: sel?.id, selAb }) + marcas.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${7 * k}" fill="#2f6fd6" stroke="#fff" stroke-width="${2 * k}"/>`).join('')
+      + (marcas.length === 2 ? `<line x1="${marcas[0][0]}" y1="${marcas[0][1]}" x2="${marcas[1][0]}" y2="${marcas[1][1]}" stroke="#2f6fd6" stroke-width="${2 * k}" stroke-dasharray="${5 * k} ${4 * k}"/>` : '');
+  };
+  // modos do fundo: dimensionar por 2 pontos de medida conhecida, ou arrastar para posicionar
+  const modoFundo = (m, txt) => {
+    selecionar(null); selecionarAb(null); modo = m; marcas.length = 0; desenha();
+    const bar = document.getElementById('pbar'); bar.hidden = false;
+    bar.innerHTML = `<span class="muted" style="flex:1">${txt}</span><button class="small btn2" id="pFim">${m === 'mover' ? ic('ok') + ' Concluir' : 'Cancelar'}</button>`;
+    document.getElementById('pFim').onclick = () => { modo = null; marcas.length = 0; bar.hidden = true; desenha(); };
+  };
+  const concluirEscala = async () => {
+    const fd = fundoParede(e, i), [p1, p2] = marcas, d = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const r = await pedir('Dimensionar fundo', `Medida real entre os dois pontos, em mm (no desenho: ${Math.round(d)} mm)`);
+    const real = parseFloat(String(r || '').replace(',', '.'));
+    modo = null; marcas.length = 0; document.getElementById('pbar').hidden = true;
+    if (!fd || !(real > 0) || !(d > 0)) { desenha(); return toast('Dimensionamento cancelado.'); }
+    const s = real / d; fd.x = p1[0] + (fd.x - p1[0]) * s; fd.y = p1[1] + (fd.y - p1[1]) * s; fd.w *= s; fd.h *= s;
+    tocar(); desenha(); toast(`Escala ajustada: ${Math.round(real)} mm entre os pontos.`);
+  };
+  const menuFundo = () => {
+    const fd = fundoParede(e, i), d = document.getElementById('dlg');
+    d.innerHTML = `<b>Fundo da parede P${i + 1}</b><p class="muted">Foto da parede de frente ou corte do projeto (PDF ou imagem) para referência.</p><div style="display:grid;gap:8px">
+      <button id="fEsc">${ic('baixar')} ${fd ? 'Trocar' : 'Escolher'} imagem ou PDF</button>
+      ${fd ? `<button class="btn2" id="fDim">${ic('regua')} Dimensionar (2 pontos)</button><button class="btn2" id="fMov">${ic('ajustar')} Mover</button>
+      <button class="btn2" id="fEst">Encaixar na parede (esticar)</button><button class="btn2" id="fOp">Transparência: ${Math.round((fd.op ?? 0.6) * 100)}%</button>
+      <button class="btnbad" id="fX">${ic('lixo')} Remover fundo</button>` : ''}<button class="btn2" id="fF">Fechar</button></div>`;
+    d.showModal(); const q = x => d.querySelector(x);
+    q('#fF').onclick = () => d.close();
+    q('#fEsc').onclick = () => { d.close(); escolherArquivo('image/*,.pdf,application/pdf', async f => { try { await importarFundoParede(a, e, i, f); desenha(); modoFundo('escala', 'Toque em 2 pontos de uma medida conhecida do fundo'); } catch (err) { aviso('Não abriu o arquivo', esc(err.message)); } }); };
+    q('#fDim')?.addEventListener('click', () => { d.close(); modoFundo('escala', 'Toque em 2 pontos de uma medida conhecida do fundo'); });
+    q('#fMov')?.addEventListener('click', () => { d.close(); modoFundo('mover', 'Arraste para posicionar o fundo'); });
+    q('#fEst')?.addEventListener('click', () => { d.close(); Object.assign(fd, { x: 0, y: -G.H, w: G.L, h: G.H }); tocar(); desenha(); });
+    q('#fOp')?.addEventListener('click', () => { const o = [0.3, 0.6, 0.85], j = o.indexOf(fd.op ?? 0.6); fd.op = o[(j + 1) % o.length]; tocar(); desenha(); d.close(); menuFundo(); });
+    q('#fX')?.addEventListener('click', async () => { d.close(); if (!await confirmar('Remover o fundo desta parede?')) return; await DB.del('fotos', fd.img); delete URLS[fd.img]; e.fundosP = e.fundosP.filter(x => x !== fd); tocar(); desenha(); });
+  };
   // arrastando encaixa de 10 em 10 mm; medida do laser ou digitada fica exata (mm)
   const lim = (pt, passo = 1) => { pt.x = Math.max(0, Math.min(G.L, Math.round(pt.x / passo) * passo)); pt.h = Math.max(0, Math.min(G.H, Math.round(pt.h / passo) * passo)); };
+  // se o item selecionado ficar atrás da barra de edição, a vista sobe
+  const mostrarAcima = yMundo => {
+    const bar = document.getElementById('pbar'); if (bar.hidden) return;
+    const r = svg.getBoundingClientRect(), yTela = r.top + v.ty + yMundo * v.S, lim = bar.getBoundingClientRect().top - 40;
+    if (yTela > lim) { v.ty -= yTela - lim; v.aplicar(true); }
+  };
   const v = new Vista(svg, {
     mudou: desenha,
     onDown: (w, tgt) => {
-      const el = tgt.closest?.('[data-pt]'); if (!el) return null;
-      const pt = e.pontos.find(x => x.id === el.dataset.pt), x0 = pt.x, h0 = pt.h;
+      if (modo === 'escala') return { up: (w2, m) => { if (m) return; marcas.push(w2); desenha(); if (marcas.length === 2) concluirEscala(); } };
+      if (modo === 'mover') {
+        const fd = fundoParede(e, i); if (!fd) return null; const x0 = fd.x, y0 = fd.y;
+        return { move: (w2, m) => { if (!m) return; fd.x = x0 + w2[0] - w[0]; fd.y = y0 + w2[1] - w[1]; desenha(); }, up: (_, m) => { if (m) tocar(); } };
+      }
+      const el = tgt.closest?.('[data-pt]');
+      if (el) {
+        const pt = e.pontos.find(x => x.id === el.dataset.pt), x0 = pt.x, h0 = pt.h;
+        return {
+          move: (w2, m) => { if (!m) return; pt.x = x0 + w2[0] - w[0]; pt.h = h0 - (w2[1] - w[1]); lim(pt, 10); sel = pt; desenha(); },
+          up: (_, m) => { if (m) { pt.o = 'manual'; tocar(); } selecionar(pt); }
+        };
+      }
+      const ea = tgt.closest?.('[data-ab2]'); if (!ea) return null;
+      const j = +ea.dataset.ab2, o = e.aberturas[j], xe0 = abEsq(G, o), p0 = +o.peit || 0;
       return {
-        move: (w2, m) => { if (!m) return; pt.x = x0 + w2[0] - w[0]; pt.h = h0 - (w2[1] - w[1]); lim(pt, 10); sel = pt; desenha(); },
-        up: (_, m) => { if (m) { pt.o = 'manual'; tocar(); } selecionar(pt); }
+        move: (w2, m) => {
+          if (!m) return; const xe = Math.max(0, Math.min(G.L - (+o.larg || 0), Math.round((xe0 + w2[0] - w[0]) / 10) * 10)); abDeEsq(G, o, xe);
+          if (o.tipo !== 'porta') o.peit = Math.max(0, Math.min(G.H - (+o.alt || 0), Math.round((p0 - (w2[1] - w[1])) / 10) * 10));
+          selAb = j; desenha();
+        },
+        up: (_, m) => { if (m) tocar(); selecionarAb(j); }
       };
     },
-    onTap: () => { if (sel) selecionar(null); }
+    onTap: () => { if (modo) return; if (sel) selecionar(null); if (selAb != null) selecionarAb(null); }
   });
+  // barra com campos medidos em sequência pelo laser
+  const barraCampos = (bar, campos, ler, gravar, depois) => {
+    const inps = [...bar.querySelectorAll('[data-c]')];
+    const focar = j => { inps.forEach(x => x.classList.remove('alvo')); const inp = inps[j]; inp.classList.add('alvo'); alvo = { inp, aplicar: val => { gravar(inp.dataset.c, val, 'laser'); inp.value = Math.round(ler(inp.dataset.c)); depois(); if (j + 1 < inps.length) focar(j + 1); } }; };
+    inps.forEach((inp, j) => { inp.onfocus = () => focar(j); inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); if (!isNaN(val)) gravar(inp.dataset.c, val, 'manual'); inp.value = Math.round(ler(inp.dataset.c)); depois(); }; });
+    focar(0);
+  };
   const selecionar = pt => {
-    sel = pt; desenha(); const bar = document.getElementById('pbar'); alvo = null;
+    sel = pt; selAb = null; desenha(); const bar = document.getElementById('pbar'); alvo = null;
     if (!pt) { bar.hidden = true; return; }
     const T = TIPOS_PONTO[pt.tipo] || TIPOS_PONTO.outro; bar.hidden = false;
-    bar.innerHTML = `<b style="color:${T[1]}">${T[0]}</b><label class="mini">Da esquerda<input data-c="x" inputmode="decimal" value="${Math.round(pt.x)}"></label><label class="mini">Altura<input data-c="h" inputmode="decimal" value="${Math.round(pt.h)}"></label>
+    bar.innerHTML = `${icPonto(T, 26)}<label class="mini">Da esquerda<input data-c="x" inputmode="decimal" value="${Math.round(pt.x)}"></label><label class="mini">Altura<input data-c="h" inputmode="decimal" value="${Math.round(pt.h)}"></label>
       <button class="small btn2" id="pObs" aria-label="Observação">${ic('nota')}</button><button class="small btnbad" id="pX" aria-label="Excluir">${ic('lixo')}</button><button class="small btn2" id="pOk" aria-label="Fechar">${ic('ok')}</button>`;
-    const inps = [...bar.querySelectorAll('[data-c]')];
-    const grava = (c, val, o) => { if (val == null) return; pt[c] = val; pt.o = o; lim(pt); tocar(); desenha(); };
-    const focar = j => { inps.forEach(x => x.classList.remove('alvo')); const inp = inps[j]; inp.classList.add('alvo'); alvo = { inp, aplicar: val => { grava(inp.dataset.c, val, 'laser'); inp.value = Math.round(pt[inp.dataset.c]); if (j === 0) focar(1); } }; };
-    inps.forEach((inp, j) => { inp.onfocus = () => focar(j); inp.onchange = () => { const val = parseFloat(inp.value.replace(',', '.')); grava(inp.dataset.c, isNaN(val) ? null : val, 'manual'); inp.value = Math.round(pt[inp.dataset.c]); }; });
-    focar(0);
+    barraCampos(bar, null, c => pt[c], (c, val, o) => { pt[c] = val; pt.o = o; lim(pt); tocar(); }, desenha);
     document.getElementById('pObs').onclick = async () => { const r = await pedir(`${T[0]} — observação`, 'Ex.: 220V, dupla, 20A, saída de 3/4"…', pt.obs || ''); pt.obs = r || ''; tocar(); selecionar(pt); };
     document.getElementById('pX').onclick = () => { e.pontos = e.pontos.filter(x => x !== pt); tocar(); selecionar(null); };
     document.getElementById('pOk').onclick = () => selecionar(null);
+    mostrarAcima(-pt.h);
+  };
+  const selecionarAb = j => {
+    selAb = j; sel = null; desenha(); const bar = document.getElementById('pbar'); alvo = null;
+    if (j == null) { bar.hidden = true; return; }
+    const o = e.aberturas[j], porta = o.tipo === 'porta'; bar.hidden = false;
+    const C = [['xe', 'Da esq.'], ['larg', 'Larg.'], ['alt', 'Alt.'], ...(porta ? [] : [['peit', 'Peit.']])];
+    const ler = c => c === 'xe' ? abEsq(G, o) : +o[c] || 0;
+    bar.innerHTML = `${ic(porta ? 'porta' : 'janela')}${C.map(([c, l]) => `<label class="mini">${l}<input data-c="${c}" inputmode="decimal" value="${Math.round(ler(c))}"></label>`).join('')}<button class="small btnbad" id="pX" aria-label="Excluir">${ic('lixo')}</button><button class="small btn2" id="pOk" aria-label="Fechar">${ic('ok')}</button>`;
+    barraCampos(bar, C, ler, (c, val, orig) => {
+      const xe = abEsq(G, o); // a distância da esquerda fica fixa quando muda a largura
+      if (c === 'xe') abDeEsq(G, o, Math.max(0, val)); else { o[c] = Math.round(val); if (c === 'larg') abDeEsq(G, o, xe); }
+      o.o = orig; tocar();
+    }, desenha);
+    document.getElementById('pX').onclick = () => { e.aberturas.splice(j, 1); tocar(); selecionarAb(null); };
+    document.getElementById('pOk').onclick = () => selecionarAb(null);
+    mostrarAcima(-(porta ? 0 : +o.peit || 0));
   };
   app.querySelectorAll('[data-novo]').forEach(b => b.onclick = () => {
     const T = TIPOS_PONTO[b.dataset.novo], pt = { id: uid(), tipo: b.dataset.novo, parede: i, x: Math.round(G.L / 2 / 10) * 10, h: Math.min(T[3], G.H), obs: '', o: null };
     e.pontos.push(pt); tocar(); selecionar(pt); toast('Meça a distância da esquerda e depois a altura.');
   });
-  const ajustar = () => { const m = Math.max(G.L, G.H) * 0.1 + 250; v.enquadrar({ x: -m, y: -G.H - m, w: G.L + 2 * m, h: G.H + 2 * m }, 0.02); };
+  app.querySelectorAll('[data-abnova]').forEach(b => b.onclick = () => {
+    const porta = b.dataset.abnova === 'porta', c = porta ? S.cfg.porta : S.cfg.janela, larg = Math.min(c.larg, G.L);
+    const o = { tipo: b.dataset.abnova, parede: i, dist: 0, larg, alt: Math.min(c.alt, G.H), peit: porta ? 0 : c.peit };
+    abDeEsq(G, o, Math.max(0, Math.round((G.L - larg) / 2))); e.aberturas.push(o); tocar(); selecionarAb(e.aberturas.length - 1);
+    toast(porta ? 'Meça: distância da esquerda, largura e altura.' : 'Meça: distância da esquerda, largura, altura e peitoril.');
+  });
+  const ajustar = () => { const m = Math.max(G.L, G.H) * 0.1 + 250; v.enquadrar({ x: -m, y: -G.H - m, w: G.L + 2 * m, h: G.H + 2 * m + Math.max(G.L, G.H) * 0.12 }, 0.02); };
   ligarZoom(app, v, ajustar); ajustar();
+  document.getElementById('pFundo').onclick = menuFundo;
+  carregarUrls(a).then(desenha);
 }
 async function paredePNG(e, i, W = 1800) {
   const G = elevGeo(e, i), m = Math.max(G.L, G.H) * 0.08 + 250, X = -m, Y = -G.H - m, Wd = G.L + 2 * m, Hd = G.H + 2 * m, k = Math.max(Wd, Hd) / 700;
-  const H = Math.round(W * Hd / Wd);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${X} ${Y} ${Wd} ${Hd}" font-family="Helvetica, Arial, sans-serif"><rect x="${X}" y="${Y}" width="${Wd}" height="${Hd}" fill="#ffffff"/>${svgParede(e, i, k)}</svg>`;
+  const H = Math.round(W * Hd / Wd), fd = fundoParede(e, i);
+  // imagem dentro de SVG desenhado como <img> não carrega; o fundo vai direto no canvas, embaixo do desenho
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${X} ${Y} ${Wd} ${Hd}" font-family="Helvetica, Arial, sans-serif">${fd ? '' : `<rect x="${X}" y="${Y}" width="${Wd}" height="${Hd}" fill="#ffffff"/>`}${svgParede(e, i, k, { urls: false })}</svg>`;
   const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode();
-  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H);
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  if (fd) { const b = await DB.get('fotos', fd.img); if (b) { const bmp = await createImageBitmap(b), s = W / Wd; g.globalAlpha = fd.op ?? 0.6; g.drawImage(bmp, (fd.x - X) * s, (fd.y - Y) * s, fd.w * s, fd.h * s); g.globalAlpha = 1; } }
+  g.drawImage(img, 0, 0, W, H);
   return { url: c.toDataURL('image/png'), w: W, h: H };
 }
-const paredesComVista = e => { const n = esbGeo(e).n, s = new Set([...(e.pontos || []).map(p => +p.parede)]); return [...Array(n).keys()].filter(i => s.has(i)); };
+const paredesComVista = e => { const n = esbGeo(e).n, s = new Set([...(e.pontos || []).map(p => +p.parede), ...(e.fundosP || []).map(f => +f.parede), ...e.aberturas.map(o => +o.parede)]); return [...Array(n).keys()].filter(i => s.has(i)); };
 
 /* ===================== Checklist da medição (por ambiente) ===================== */
 // Itens automáticos saem dos dados; os outros o medidor marca como feito ou "não se aplica".
@@ -2648,7 +2776,7 @@ function checkProgresso(a) {
 function dicaCheck(a, k) {
   const pts = a.esbocos.flatMap(e => e.pontos || []), n = t => pts.filter(p => t.includes(p.tipo)).length;
   if (k === 'eletrica') return n(['tomada', 'interruptor']) ? `${n(['tomada', 'interruptor'])} ponto(s) nas vistas das paredes` : '';
-  if (k === 'hidraulica') return n(['agua', 'esgoto']) ? `${n(['agua', 'esgoto'])} ponto(s) nas vistas das paredes` : '';
+  if (k === 'hidraulica') return n(['agua', 'registro', 'esgoto']) ? `${n(['agua', 'registro', 'esgoto'])} ponto(s) nas vistas das paredes` : '';
   if (k === 'gas') return n(['gas']) ? `${n(['gas'])} ponto(s) marcado(s)` : '';
   if (k === 'ar') return n(['ar']) ? `${n(['ar'])} ponto(s) marcado(s)` : '';
   if (k === 'fotos') return `${a.fotos.length} foto(s) na área`;
