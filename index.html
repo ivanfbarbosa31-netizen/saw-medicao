@@ -141,6 +141,14 @@ label.sw input{width:24px;height:24px;flex:0 0 24px}
 body{padding-bottom:calc(108px + env(safe-area-inset-bottom))}
 /* teclado do iPhone: --kb vem do visualViewport e sobe as barras e os diálogos */
 :root{--kb:0px}
+#tecl{position:fixed;left:0;right:0;bottom:0;z-index:8;background:#e9e3d8;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(4,1fr);gap:7px;max-width:620px;margin:0 auto;touch-action:manipulation}
+#tecl[hidden]{display:none}
+#tecl button{background:var(--card);color:var(--tx);border-radius:12px;padding:0;height:48px;font:600 22px/1 var(--mono);box-shadow:0 1px 0 rgba(0,0,0,.12)}
+#tecl button:active{background:var(--acc2)}
+#tecl .tk2{background:#d9d1c3}
+#tecl .tkok{grid-row:span 2;height:auto;background:var(--acc);color:#fff;font-size:18px}
+#tecl .tk0{grid-column:span 2}
+input.editando{outline:3px solid var(--acc)!important;background:#fff8f5}
 #laserbar{bottom:calc(10px + env(safe-area-inset-bottom) + var(--kb))}
 .fbar{bottom:calc(80px + env(safe-area-inset-bottom) + var(--kb))}
 .toast{bottom:calc(92px + env(safe-area-inset-bottom) + var(--kb))}
@@ -160,6 +168,12 @@ dialog:modal{bottom:var(--kb);max-height:calc(100dvh - var(--kb) - 24px);overflo
 <body>
 <header><button id="voltar" aria-label="Voltar"><svg class="i" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="titulo"><span class="marca">NYCXO <i>medida</i></span></h1><span id="salvo" class="salvo" aria-live="polite"></span><button id="menu" aria-label="Menu"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button></header>
 <main id="app"></main>
+<div id="tecl" hidden>
+  <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="bs" class="tk2" aria-label="Apagar">⌫</button>
+  <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="c" class="tk2">C</button>
+  <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="ok" class="tkok">OK</button>
+  <button data-k="0" class="tk0">0</button><button data-k=",">,</button>
+</div>
 <div id="laserbar">
   <div class="st"><span class="dot" id="ldot"></span><span id="lst">Laser off</span></div>
   <div id="chips"></div>
@@ -481,6 +495,44 @@ function ajustarTeclado() {
 }
 if (window.visualViewport) { visualViewport.addEventListener('resize', ajustarTeclado); visualViewport.addEventListener('scroll', ajustarTeclado); }
 document.addEventListener('focusin', e => { const t = e.target; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && !t.closest('.fbar, dialog')) setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300); });
+// telas travadas (planta, foto, parede): se o iPhone empurrar a página ao abrir um teclado, ela volta ao lugar
+document.addEventListener('focusout', () => setTimeout(() => { if (document.body.classList.contains('travado') && !document.activeElement?.matches?.('input, textarea')) window.scrollTo(0, 0); }, 120));
+
+/* ===================== Teclado numérico do app (barras de medida) ===================== */
+// Os campos de medida das barras não abrem o teclado do iPhone (que empurra a tela para cima):
+// ficam somente leitura e usam este teclado, que aparece embaixo e sobe as barras.
+const TEC = { inp: null, novo: true, ini: '' };
+const ehCampoMedida = el => el?.tagName === 'INPUT' && el.closest('.fbar') && el.getAttribute('inputmode') === 'decimal';
+new MutationObserver(() => document.querySelectorAll('.fbar input[inputmode="decimal"]:not([readonly])').forEach(i => i.readOnly = true)).observe(document.body, { childList: true, subtree: true });
+function abrirTeclado(inp) {
+  if (TEC.inp && TEC.inp !== inp) fecharTeclado(true);
+  const el = document.getElementById('tecl'); TEC.inp = inp; TEC.novo = true; TEC.ini = inp.value;
+  document.querySelectorAll('input.editando').forEach(x => x.classList.remove('editando')); inp.classList.add('editando');
+  el.hidden = false; document.documentElement.style.setProperty('--kb', el.offsetHeight + 'px');
+}
+function fecharTeclado(aplicar) {
+  const inp = TEC.inp; TEC.inp = null; document.getElementById('tecl').hidden = true; document.documentElement.style.setProperty('--kb', '0px');
+  if (!inp) return; inp.classList.remove('editando'); inp.blur();
+  if (aplicar && inp.value !== TEC.ini && document.body.contains(inp)) inp.dispatchEvent(new Event('change'));
+}
+function teclar(k) {
+  const inp = TEC.inp; if (!inp) return;
+  if (k === 'ok') { fecharTeclado(true); return; }
+  if (k === 'bs') { inp.value = TEC.novo ? '' : inp.value.slice(0, -1); TEC.novo = false; return; }
+  if (k === 'c') { inp.value = ''; TEC.novo = false; return; }
+  if (k === ',' && !TEC.novo && inp.value.includes(',')) return;
+  inp.value = (TEC.novo ? '' : inp.value) + k; TEC.novo = false;
+}
+document.addEventListener('focusin', e => { if (ehCampoMedida(e.target)) abrirTeclado(e.target); });
+document.addEventListener('click', e => { if (ehCampoMedida(e.target) && TEC.inp !== e.target) abrirTeclado(e.target); });
+document.addEventListener('pointerdown', e => {
+  if (!TEC.inp) return; const t = e.target;
+  if (t.closest('#tecl') || ehCampoMedida(t)) return;
+  fecharTeclado(true);
+}, true);
+const tecEl = document.getElementById('tecl');
+tecEl.addEventListener('pointerdown', e => e.preventDefault()); // não tira o foco do campo
+tecEl.addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (b) teclar(b.dataset.k); });
 
 /* ===================== Navegação ===================== */
 let rota = { v: 'home' };
@@ -503,6 +555,7 @@ document.getElementById('voltar').onclick = () => {
 document.getElementById('menu').onclick = menuGeral;
 
 async function render() {
+  if (TEC.inp) fecharTeclado(true);
   if (V3 && rota.v !== '3d') parar3D();
   document.body.classList.toggle('travado', ['area', 'esb', 'foto', 'parede', 'planta'].includes(rota.v));
   document.getElementById('voltar').style.display = rota.v === 'home' ? 'none' : '';
