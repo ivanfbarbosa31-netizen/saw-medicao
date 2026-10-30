@@ -135,7 +135,7 @@ header button{width:44px;height:44px;flex:0 0 44px}
 #chips span{min-height:44px;display:inline-flex;align-items:center}
 input,select,textarea{min-height:44px}
 .fbar input{padding:10px}
-label.mini input{padding:10px 6px}
+label.mini input{padding:10px 6px;flex:0 0 auto}
 label.sw{min-height:44px;margin:0;padding:6px 0}
 label.sw input{width:24px;height:24px;flex:0 0 24px}
 body{padding-bottom:calc(108px + env(safe-area-inset-bottom))}
@@ -796,7 +796,7 @@ async function vBase() {
   await carregarUrls(a);
   for (const f of a.fotos) if (!f.ar && URLS[f.id]) { const im = new Image(); im.src = URLS[f.id]; await im.decode().catch(() => { }); if (im.naturalWidth) f.ar = im.naturalHeight / im.naturalWidth; }
   app.innerHTML = `
-  <div class="ftool"><button class="small btn2" id="bLeit">${ic('leituras')} Leituras · ${a.leituras.length}</button><button class="small btn2" id="bCheck">${ic('ok')} Checklist · ${checkProgresso(a).feito}/${checkProgresso(a).total}</button><span style="flex:1"></span>${KIT_ZOOM}<button class="small btn2" id="bMais" aria-label="Mais">${ic('mais')}</button></div>
+  <div class="ftool"><button class="small btn2" id="bLeit" aria-label="Leituras do laser">${ic('leituras')} ${a.leituras.length}</button><button class="small btn2" id="bCheck" aria-label="Checklist da medição">${ic('ok')} ${checkProgresso(a).feito}/${checkProgresso(a).total}</button><span style="flex:1"></span>${KIT_ZOOM}<button class="small btn2" id="bMais" aria-label="Mais">${ic('mais')}</button></div>
   <div class="board"><svg id="bsvg" class="vsvg"><g class="cam"></g></svg>
    <div class="fdica" id="bdica" ${itensDaArea(a).length ? 'hidden' : ''}>Toque em + para criar o esboço, tirar fotos ou anotar</div>
    <button class="fab" id="bAdd" aria-label="Adicionar">${ic('add')}</button></div>`;
@@ -2574,19 +2574,20 @@ function vParede() {
   app.innerHTML = `
   <div class="ftool"><span class="muted" style="flex:1">Vista de dentro do cômodo · distâncias da esquerda</span>${KIT_ZOOM}</div>
   <div class="ftool" style="overflow-x:auto;flex-wrap:nowrap">${Object.entries(TIPOS_PONTO).map(([k, T]) => `<button class="small btn2" data-novo="${k}" style="flex:0 0 auto"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${T[1]}"></span>${T[0]}</button>`).join('')}</div>
-  <div class="board" style="height:calc(100dvh - 250px - env(safe-area-inset-top) - env(safe-area-inset-bottom))"><svg id="psvg" class="vsvg esb"><g class="cam"></g></svg><div class="fdica" id="pdica" ${G.conhecido ? 'hidden' : ''}>Pé-direito não medido: usando ${fL(PE_DIREITO_PADRAO)}</div></div>
+  <div class="board" style="height:calc(100dvh - 330px - env(safe-area-inset-top) - env(safe-area-inset-bottom))"><svg id="psvg" class="vsvg esb"><g class="cam"></g></svg><div class="fdica" id="pdica" ${G.conhecido ? 'hidden' : ''}>Pé-direito não medido: usando ${fL(PE_DIREITO_PADRAO)}</div></div>
   <div id="pbar" class="fbar" hidden></div>`;
   const svg = document.getElementById('psvg'), cam = svg.querySelector('g.cam');
   let sel = null;
   const desenha = () => { cam.innerHTML = svgParede(e, i, v.k, { sel: sel?.id }); };
-  const lim = pt => { pt.x = Math.max(0, Math.min(G.L, Math.round(pt.x / 10) * 10)); pt.h = Math.max(0, Math.min(G.H, Math.round(pt.h / 10) * 10)); };
+  // arrastando encaixa de 10 em 10 mm; medida do laser ou digitada fica exata (mm)
+  const lim = (pt, passo = 1) => { pt.x = Math.max(0, Math.min(G.L, Math.round(pt.x / passo) * passo)); pt.h = Math.max(0, Math.min(G.H, Math.round(pt.h / passo) * passo)); };
   const v = new Vista(svg, {
     mudou: desenha,
     onDown: (w, tgt) => {
       const el = tgt.closest?.('[data-pt]'); if (!el) return null;
       const pt = e.pontos.find(x => x.id === el.dataset.pt), x0 = pt.x, h0 = pt.h;
       return {
-        move: (w2, m) => { if (!m) return; pt.x = x0 + w2[0] - w[0]; pt.h = h0 - (w2[1] - w[1]); lim(pt); sel = pt; desenha(); },
+        move: (w2, m) => { if (!m) return; pt.x = x0 + w2[0] - w[0]; pt.h = h0 - (w2[1] - w[1]); lim(pt, 10); sel = pt; desenha(); },
         up: (_, m) => { if (m) { pt.o = 'manual'; tocar(); } selecionar(pt); }
       };
     },
