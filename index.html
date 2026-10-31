@@ -501,38 +501,46 @@ document.addEventListener('focusout', () => setTimeout(() => { if (document.body
 /* ===================== Teclado numérico do app (barras de medida) ===================== */
 // Os campos de medida das barras não abrem o teclado do iPhone (que empurra a tela para cima):
 // ficam somente leitura e usam este teclado, que aparece embaixo e sobe as barras.
-const TEC = { inp: null, novo: true, ini: '' };
+const TEC = { inp: null, novo: true, ini: '', aberto: 0, bloq: 0 };
 const ehCampoMedida = el => el?.tagName === 'INPUT' && el.closest('.fbar') && el.getAttribute('inputmode') === 'decimal';
 new MutationObserver(() => document.querySelectorAll('.fbar input[inputmode="decimal"]:not([readonly])').forEach(i => i.readOnly = true)).observe(document.body, { childList: true, subtree: true });
+// O iPhone manda um "clique fantasma" ~300 ms depois do toque, no mesmo lugar. Quando o teclado abre ou fecha,
+// a tela muda embaixo do dedo e esse clique cairia em outro botão (ex.: Conectar, uma janela da planta): bloqueado.
+const bloquearCliques = ms => { TEC.bloq = Date.now() + ms; };
+['click', 'mousedown', 'mouseup'].forEach(t => document.addEventListener(t, e => { if (Date.now() < TEC.bloq && !e.target.closest?.('#tecl')) { e.preventDefault(); e.stopPropagation(); } }, true));
 function abrirTeclado(inp) {
-  if (TEC.inp && TEC.inp !== inp) fecharTeclado(true);
-  const el = document.getElementById('tecl'); TEC.inp = inp; TEC.novo = true; TEC.ini = inp.value;
+  if (TEC.inp === inp) return;
+  if (TEC.inp) fecharTeclado(true, true);
+  const el = document.getElementById('tecl'); TEC.inp = inp; TEC.novo = true; TEC.ini = inp.value; TEC.aberto = Date.now();
   document.querySelectorAll('input.editando').forEach(x => x.classList.remove('editando')); inp.classList.add('editando');
-  el.hidden = false; document.documentElement.style.setProperty('--kb', el.offsetHeight + 'px');
+  el.hidden = false; document.documentElement.style.setProperty('--kb', el.offsetHeight + 'px'); bloquearCliques(450);
 }
-function fecharTeclado(aplicar) {
+function fecharTeclado(aplicar, semBloqueio) {
   const inp = TEC.inp; TEC.inp = null; document.getElementById('tecl').hidden = true; document.documentElement.style.setProperty('--kb', '0px');
+  if (!semBloqueio) bloquearCliques(450);
   if (!inp) return; inp.classList.remove('editando'); inp.blur();
   if (aplicar && inp.value !== TEC.ini && document.body.contains(inp)) inp.dispatchEvent(new Event('change'));
 }
 function teclar(k) {
-  const inp = TEC.inp; if (!inp) return;
+  const inp = TEC.inp; if (!inp || Date.now() - TEC.aberto < 250) return; // toque que abriu o teclado não vira tecla
   if (k === 'ok') { fecharTeclado(true); return; }
   if (k === 'bs') { inp.value = TEC.novo ? '' : inp.value.slice(0, -1); TEC.novo = false; return; }
   if (k === 'c') { inp.value = ''; TEC.novo = false; return; }
   if (k === ',' && !TEC.novo && inp.value.includes(',')) return;
   inp.value = (TEC.novo ? '' : inp.value) + k; TEC.novo = false;
 }
-document.addEventListener('focusin', e => { if (ehCampoMedida(e.target)) abrirTeclado(e.target); });
-document.addEventListener('click', e => { if (ehCampoMedida(e.target) && TEC.inp !== e.target) abrirTeclado(e.target); });
+document.addEventListener('pointerup', e => { if (ehCampoMedida(e.target)) abrirTeclado(e.target); });
+// toque fora do teclado e fora dos campos: grava e fecha (o toque segue para o que foi tocado)
 document.addEventListener('pointerdown', e => {
   if (!TEC.inp) return; const t = e.target;
   if (t.closest('#tecl') || ehCampoMedida(t)) return;
-  fecharTeclado(true);
+  fecharTeclado(true, true);
 }, true);
 const tecEl = document.getElementById('tecl');
-tecEl.addEventListener('pointerdown', e => e.preventDefault()); // não tira o foco do campo
-tecEl.addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (b) teclar(b.dataset.k); });
+// tecla responde no toque (pointerdown); o resto do toque não chega a mais ninguém
+tecEl.addEventListener('pointerdown', e => { e.preventDefault(); const b = e.target.closest('[data-k]'); if (b) teclar(b.dataset.k); });
+tecEl.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+['click', 'mousedown', 'mouseup', 'touchend'].forEach(t => tecEl.addEventListener(t, e => { e.preventDefault(); e.stopPropagation(); }));
 
 /* ===================== Navegação ===================== */
 let rota = { v: 'home' };
