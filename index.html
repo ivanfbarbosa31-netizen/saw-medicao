@@ -546,8 +546,6 @@ document.addEventListener('click', e => {
   e.preventDefault(); e.stopPropagation(); fecharTeclado(true);
 }, true);
 tecEl.addEventListener('mousedown', e => e.preventDefault()); // não tira o foco do campo
-// diagnóstico: com o teclado aberto, os eventos de toque vão para o "Diagnóstico do Bluetooth"
-['touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown', 'click'].forEach(t => window.addEventListener(t, e => { if (!TEC.inp && t !== 'click') return; const p = e.changedTouches?.[0] || e, r = tecEl.getBoundingClientRect(); L.log.unshift(`${t} ${Math.round(p.clientX)},${Math.round(p.clientY)} alvo=${(e.target.id || e.target.dataset?.k || e.target.tagName)} tec=${TEC.inp ? 'aberto' : 'fechado'} top=${Math.round(r.top)} bloq=${Math.max(0, TEC.bloq - Date.now())}`); L.log.length = Math.min(L.log.length, 60); }, true));
 // a barra foi trocada (outra parede, outro item): o teclado do campo antigo fecha
 new MutationObserver(() => { if (TEC.inp && !document.body.contains(TEC.inp)) fecharTeclado(false, true); }).observe(document.body, { childList: true, subtree: true });
 
