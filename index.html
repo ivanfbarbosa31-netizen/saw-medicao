@@ -231,7 +231,7 @@ let S = { projetos: [], leiturasSoltas: [], lixeira: [], excluidos: [], bkp: { u
 // Cada projeto, área, item, valor e leitura tem: id (UUID estável), criado_em, alterado_em e excluido_em (ms).
 // Estrutura: projeto > área > item (esboço, foto, nota, scan) > valor (parede, abertura, seta, altura) + leitura do laser.
 // Origem da medida: laser | manual (digitada) | importada | nula (estimada). Projeto tem o campo opcional pv.
-const ESQUEMA = 2, VERSAO_APP = '0.8';
+const ESQUEMA = 2, VERSAO_APP = '0.8.3';
 const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function hash128(str) {
   let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
@@ -507,7 +507,7 @@ new MutationObserver(() => document.querySelectorAll('.fbar input[inputmode="dec
 // O iPhone manda um "clique fantasma" ~300 ms depois do toque, no mesmo lugar. Quando o teclado abre ou fecha,
 // a tela muda embaixo do dedo e esse clique cairia em outro botão (ex.: Conectar, uma janela da planta): bloqueado.
 const bloquearCliques = ms => { TEC.bloq = Date.now() + ms; };
-['click', 'mousedown', 'mouseup'].forEach(t => document.addEventListener(t, e => { if (Date.now() < TEC.bloq && !e.target.closest?.('#tecl')) { e.preventDefault(); e.stopPropagation(); } }, true));
+['click', 'mousedown', 'mouseup'].forEach(t => window.addEventListener(t, e => { if (Date.now() < TEC.bloq && !e.target.closest?.('#tecl')) { e.preventDefault(); e.stopPropagation(); } }, true));
 function abrirTeclado(inp) {
   if (TEC.inp === inp) return;
   if (TEC.inp) fecharTeclado(true, true);
@@ -522,31 +522,32 @@ function fecharTeclado(aplicar, semBloqueio) {
   if (aplicar && inp.value !== TEC.ini && document.body.contains(inp)) inp.dispatchEvent(new Event('change'));
 }
 function teclar(k) {
-  const inp = TEC.inp; if (!inp || Date.now() - TEC.aberto < 250) return; // toque que abriu o teclado não vira tecla
+  const inp = TEC.inp; if (!inp) return;
   if (k === 'ok') { fecharTeclado(true); return; }
   if (k === 'bs') { inp.value = TEC.novo ? '' : inp.value.slice(0, -1); TEC.novo = false; return; }
   if (k === 'c') { inp.value = ''; TEC.novo = false; return; }
   if (k === ',' && !TEC.novo && inp.value.includes(',')) return;
   inp.value = (TEC.novo ? '' : inp.value) + k; TEC.novo = false;
 }
-document.addEventListener('pointerup', e => { if (ehCampoMedida(e.target)) abrirTeclado(e.target); });
-// Toques com o teclado aberto são decididos pela POSIÇÃO do dedo (no iPhone o alvo do evento nem sempre é a tecla):
-// dentro do teclado = tecla; fora dele e fora dos campos = grava e fecha. O clique fantasma que vem depois é descartado.
+document.addEventListener('click', e => { if (ehCampoMedida(e.target)) abrirTeclado(e.target); });
+// Com o teclado aberto tudo é decidido no CLIQUE (no iPhone/Bluefy o clique vem no lugar certo; o pointerdown nem sempre):
+// clique numa tecla = tecla; clique fora do teclado e fora dos campos = grava e fecha (esse clique não aciona mais nada).
 const dentro = (el, x, y) => { const r = el.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; };
 const tecEl = document.getElementById('tecl');
-document.addEventListener('pointerdown', e => {
+document.addEventListener('click', e => {
   if (!TEC.inp) return;
-  if (dentro(tecEl, e.clientX, e.clientY)) {
-    e.preventDefault(); e.stopPropagation(); bloquearCliques(450);
-    const b = [...tecEl.querySelectorAll('[data-k]')].find(x => dentro(x, e.clientX, e.clientY));
-    if (b) { b.classList.add('apertada'); setTimeout(() => b.classList.remove('apertada'), 120); teclar(b.dataset.k); }
+  const naTecla = e.target.closest?.('#tecl [data-k]') || (dentro(tecEl, e.clientX, e.clientY) && [...tecEl.querySelectorAll('[data-k]')].find(x => dentro(x, e.clientX, e.clientY)));
+  if (naTecla || e.target.closest?.('#tecl')) {
+    e.preventDefault(); e.stopPropagation();
+    if (naTecla) { naTecla.classList.add('apertada'); setTimeout(() => naTecla.classList.remove('apertada'), 120); teclar(naTecla.dataset.k); }
     return;
   }
   if (ehCampoMedida(e.target)) return;
-  fecharTeclado(true);
+  e.preventDefault(); e.stopPropagation(); fecharTeclado(true);
 }, true);
-tecEl.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
-['click', 'mousedown', 'mouseup', 'touchend', 'pointerup'].forEach(t => tecEl.addEventListener(t, e => { e.preventDefault(); e.stopPropagation(); }));
+tecEl.addEventListener('mousedown', e => e.preventDefault()); // não tira o foco do campo
+// a barra foi trocada (outra parede, outro item): o teclado do campo antigo fecha
+new MutationObserver(() => { if (TEC.inp && !document.body.contains(TEC.inp)) fecharTeclado(false, true); }).observe(document.body, { childList: true, subtree: true });
 
 /* ===================== Navegação ===================== */
 let rota = { v: 'home' };
